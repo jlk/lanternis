@@ -1,0 +1,30 @@
+# Binaries
+/lanternis
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories (uncomment if vendoring)
+# vendor/
+
+# Go workspace file
+go.work
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Local env / secrets
+.env
+.env.*
