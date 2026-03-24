@@ -28,3 +28,6 @@ go.work
 # Local env / secrets
 .env
 .env.*
+
+# Local runtime database
+*.db

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/jlk/lanternis/internal/audit"
@@ -50,20 +52,174 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(`<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>Lanternis</title></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lanternis</title>
+  <style>
+    :root { --ln-bg:#f8f9fa; --ln-surface:#fff; --ln-text:#1a1a1a; --ln-muted:#6c757d; --ln-border:#dee2e6; --ln-accent:#0d6efd; --ln-warn-bg:#fff3cd; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--ln-bg); color: var(--ln-text); }
+    main { max-width: 1080px; margin: 0 auto; padding: 16px; }
+    h1 { margin-top: 0; }
+    .panel { background: var(--ln-surface); border: 1px solid var(--ln-border); border-radius: 4px; padding: 12px; margin-bottom: 12px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    label { font-size: 14px; color: var(--ln-muted); }
+    input, select, button { font: inherit; padding: 8px 10px; border-radius: 4px; border: 1px solid var(--ln-border); background: #fff; }
+    button.primary { background: var(--ln-accent); color: #fff; border-color: var(--ln-accent); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; background: var(--ln-surface); }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--ln-border); font-size: 14px; }
+    th { font-weight: 600; }
+    .muted { color: var(--ln-muted); }
+    .status { display: inline-block; min-width: 280px; }
+    #errorBox { display: none; background: var(--ln-warn-bg); border: 1px solid #ffe69c; padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
+  </style>
+</head>
 <body>
   <main>
     <h1>Lanternis</h1>
-    <p>Local network scanner (M1 scaffold).</p>
-    <p>Use the JSON endpoints for now:</p>
-    <ul>
-      <li><code>GET /api/csrf</code></li>
-      <li><code>GET /api/scan/status</code></li>
-      <li><code>POST /api/scan/start</code></li>
-      <li><code>POST /api/scan/cancel</code></li>
-      <li><code>GET /api/hosts</code></li>
-    </ul>
+    <p class="muted">Local network scanner (M1). Unknown means unknown; we do not invent confidence.</p>
+    <div id="errorBox" role="status" aria-live="polite"></div>
+
+    <section class="panel">
+      <div class="controls">
+        <button id="startBtn" class="primary">Start scan</button>
+        <button id="cancelBtn">Cancel</button>
+        <label>CIDR <input id="cidrInput" value="192.168.1.0/24" /></label>
+        <label>Mode
+          <select id="modeSelect">
+            <option value="light">light</option>
+            <option value="normal" selected>normal</option>
+            <option value="thorough">thorough</option>
+          </select>
+        </label>
+        <span id="statusText" class="status muted" aria-live="polite">Status: idle</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <table>
+        <thead>
+          <tr><th>IP</th><th>Reachability</th><th>Label</th><th>Confidence</th><th>Last seen</th></tr>
+        </thead>
+        <tbody id="hostsBody"></tbody>
+      </table>
+    </section>
+
+    <p class="muted">Only scans your configured network from this computer.</p>
   </main>
+  <script>
+    let csrfToken = "";
+    const startBtn = document.getElementById("startBtn");
+    const cancelBtn = document.getElementById("cancelBtn");
+    const statusText = document.getElementById("statusText");
+    const hostsBody = document.getElementById("hostsBody");
+    const errorBox = document.getElementById("errorBox");
+    const cidrInput = document.getElementById("cidrInput");
+    const modeSelect = document.getElementById("modeSelect");
+
+    function showError(msg) {
+      errorBox.style.display = "block";
+      errorBox.textContent = msg;
+    }
+
+    function clearError() {
+      errorBox.style.display = "none";
+      errorBox.textContent = "";
+    }
+
+    async function fetchJSON(path, options = {}) {
+      const res = await fetch(path, options);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body.error || ("request failed: " + res.status));
+      }
+      return body;
+    }
+
+    function mapModeToConcurrency(mode) {
+      if (mode === "light") return 12;
+      if (mode === "thorough") return 48;
+      return 32;
+    }
+
+    async function initCSRF() {
+      const data = await fetchJSON("/api/csrf");
+      csrfToken = data.csrf_token || "";
+    }
+
+    async function loadHosts() {
+      const data = await fetchJSON("/api/hosts");
+      const rows = data.hosts || [];
+      hostsBody.innerHTML = "";
+      if (!rows.length) {
+        hostsBody.innerHTML = "<tr><td colspan='5' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
+        return;
+      }
+      for (const h of rows) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + (h.ip || "") + "</td>" +
+          "<td>" + (h.reachability || "unknown") + "</td>" +
+          "<td>" + (h.label || "Unknown") + "</td>" +
+          "<td>" + (h.confidence || "unknown") + "</td>" +
+          "<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>";
+        hostsBody.appendChild(tr);
+      }
+    }
+
+    async function loadStatus() {
+      const st = await fetchJSON("/api/scan/status");
+      statusText.textContent = "Status: " + (st.scan_phase || "idle") + " | " + (st.completed || 0) + "/" + (st.total || 0);
+      startBtn.disabled = !!st.running;
+      cancelBtn.disabled = !st.running;
+    }
+
+    async function startScan() {
+      clearError();
+      await fetchJSON("/api/scan/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({
+          cidr: cidrInput.value,
+          mode: modeSelect.value,
+          concurrency: mapModeToConcurrency(modeSelect.value)
+        })
+      });
+      await loadStatus();
+    }
+
+    async function cancelScan() {
+      clearError();
+      await fetchJSON("/api/scan/cancel", {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrfToken }
+      });
+      await loadStatus();
+    }
+
+    startBtn.addEventListener("click", () => startScan().catch((e) => showError(e.message)));
+    cancelBtn.addEventListener("click", () => cancelScan().catch((e) => showError(e.message)));
+
+    async function tick() {
+      try {
+        await loadStatus();
+        await loadHosts();
+      } catch (e) {
+        showError(e.message);
+      }
+    }
+
+    (async function boot() {
+      try {
+        await initCSRF();
+        await tick();
+        setInterval(tick, 1500);
+      } catch (e) {
+        showError(e.message);
+      }
+    })();
+  </script>
 </body>
 </html>`))
 }
@@ -204,7 +360,7 @@ func (s *Server) requireCSRF(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		origin := r.Header.Get("Origin")
-		if origin != "" && origin != "http://127.0.0.1:8080" && origin != "http://localhost:8080" {
+		if origin != "" && !isLoopbackOrigin(origin) {
 			writeErr(w, http.StatusForbidden, errors.New("invalid origin"))
 			return
 		}
@@ -238,4 +394,16 @@ func randomToken() string {
 		return "fallback-csrf-token"
 	}
 	return hex.EncodeToString(buf)
+}
+
+func isLoopbackOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.EqualFold(host, "[::1]")
 }
