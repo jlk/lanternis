@@ -91,7 +91,7 @@ func (s *Scanner) scan(ctx context.Context, ips []string, concurrency int, onRes
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			reachable := pingFallback(ip)
+			reachable := pingHost(ctx, ip)
 			now := time.Now().UTC()
 			_ = onResult(Result{
 				IP:           ip,
@@ -114,19 +114,6 @@ func (s *Scanner) scan(ctx context.Context, ips []string, concurrency int, onRes
 	default:
 		s.finish("done")
 	}
-}
-
-func pingFallback(ip string) bool {
-	// M1 fallback: TCP connect probe (80/443) as weak reachability hint.
-	// True ICMP probes are planned under integration/build-tag work.
-	for _, port := range []string{"80", "443"} {
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 300*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Scanner) Cancel() bool {
