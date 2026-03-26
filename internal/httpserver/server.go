@@ -281,7 +281,9 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		req.Concurrency = 32
 	}
 
-	_, err := s.scanner.Start(r.Context(), req.CIDR, req.Concurrency, func(result discovery.Result) error {
+	// Important: do not bind the scan lifetime to the HTTP request context.
+	// Request contexts are cancelled when the handler returns, which would immediately cancel the scan.
+	_, err := s.scanner.Start(context.Background(), req.CIDR, req.Concurrency, func(result discovery.Result) error {
 		return s.store.UpsertHost(context.Background(), store.Host{
 			IP:           result.IP,
 			Reachability: result.Reachability,
@@ -304,6 +306,7 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.logger.Printf("scan started scan_id=%d cidr=%s mode=%s concurrency=%d", dbRunID, req.CIDR, req.Mode, req.Concurrency)
 	_ = audit.Append(r.Context(), s.store, "scan_started", map[string]any{
 		"scan_id": dbRunID,
 		"cidr":    req.CIDR,
@@ -323,6 +326,7 @@ func (s *Server) watchAndFinalize(dbRunID int64) {
 		st := s.scanner.Status()
 		if !st.Running {
 			cancelled := st.ScanPhase == "cancelled"
+			s.logger.Printf("scan finished scan_id=%d phase=%s completed=%d total=%d cancelled=%t", dbRunID, st.ScanPhase, st.Completed, st.Total, cancelled)
 			_ = s.store.MarkScanEnded(context.Background(), dbRunID, cancelled)
 			_ = audit.Append(context.Background(), s.store, "scan_finished", map[string]any{
 				"scan_id":    dbRunID,
@@ -348,6 +352,7 @@ func (s *Server) handleScanCancel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, errors.New("no scan is running"))
 		return
 	}
+	s.logger.Printf("scan cancel requested")
 	_ = audit.Append(r.Context(), s.store, "scan_cancel_requested", map[string]any{
 		"at": time.Now().UTC().Format(time.RFC3339Nano),
 	})

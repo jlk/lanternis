@@ -31,3 +31,5 @@ go.work
 
 # Local runtime database
 *.db
+*.db-wal
+*.db-shm
