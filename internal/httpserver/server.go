@@ -100,7 +100,13 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     <section class="panel">
       <table>
         <thead>
-          <tr><th>IP</th><th>Reachability</th><th>Label</th><th>Confidence</th><th>Last seen</th></tr>
+          <tr>
+            <th data-col="ip" role="button" tabindex="0" title="Sort by IP">IP</th>
+            <th data-col="reachability" role="button" tabindex="0" title="Sort by reachability">Reachability</th>
+            <th data-col="label" role="button" tabindex="0" title="Sort by label">Label</th>
+            <th data-col="confidence" role="button" tabindex="0" title="Sort by confidence">Confidence</th>
+            <th data-col="last_seen" role="button" tabindex="0" title="Sort by last seen">Last seen</th>
+          </tr>
         </thead>
         <tbody id="hostsBody"></tbody>
       </table>
@@ -117,6 +123,10 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const errorBox = document.getElementById("errorBox");
     const cidrInput = document.getElementById("cidrInput");
     const modeSelect = document.getElementById("modeSelect");
+    const tableHeaders = Array.from(document.querySelectorAll("thead th[data-col]"));
+
+    let currentHosts = [];
+    let sort = { col: "ip", dir: "asc" };
 
     function showError(msg) {
       errorBox.style.display = "block";
@@ -150,7 +160,74 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
 
     async function loadHosts() {
       const data = await fetchJSON("/api/hosts");
-      const rows = data.hosts || [];
+      currentHosts = data.hosts || [];
+      renderHosts();
+    }
+
+    function ipv4Key(ip) {
+      // Returns [a,b,c,d] for IPv4; otherwise null.
+      if (!ip) return null;
+      const parts = String(ip).trim().split(".");
+      if (parts.length !== 4) return null;
+      const out = [];
+      for (const p of parts) {
+        if (p === "" || p.length > 3) return null;
+        const n = Number(p);
+        if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+        out.push(n);
+      }
+      return out;
+    }
+
+    function compareIP(a, b) {
+      const ak = ipv4Key(a);
+      const bk = ipv4Key(b);
+      if (ak && bk) {
+        for (let i = 0; i < 4; i++) {
+          if (ak[i] !== bk[i]) return ak[i] - bk[i];
+        }
+        return 0;
+      }
+      // Fallback: string compare.
+      return String(a || "").localeCompare(String(b || ""));
+    }
+
+    function rankConfidence(v) {
+      const s = String(v || "unknown").toLowerCase();
+      if (s === "high") return 3;
+      if (s === "medium") return 2;
+      if (s === "low") return 1;
+      return 0; // unknown/other
+    }
+
+    function rankReachability(v) {
+      const s = String(v || "unknown").toLowerCase();
+      if (s === "reachable") return 2;
+      if (s === "unreachable") return 1;
+      return 0; // unknown/other
+    }
+
+    function sortedHosts() {
+      const rows = (currentHosts || []).slice();
+      rows.sort((a, b) => {
+        const dir = sort.dir === "desc" ? -1 : 1;
+        if (sort.col === "ip") return dir * compareIP(a.ip, b.ip);
+        if (sort.col === "last_seen") {
+          const at = a.last_seen ? new Date(a.last_seen).getTime() : 0;
+          const bt = b.last_seen ? new Date(b.last_seen).getTime() : 0;
+          return dir * (at - bt);
+        }
+        if (sort.col === "confidence") return dir * (rankConfidence(a.confidence) - rankConfidence(b.confidence));
+        if (sort.col === "reachability") return dir * (rankReachability(a.reachability) - rankReachability(b.reachability));
+        const av = String((a[sort.col] ?? "")).toLowerCase();
+        const bv = String((b[sort.col] ?? "")).toLowerCase();
+        return dir * av.localeCompare(bv);
+      });
+      return rows;
+    }
+
+    function renderHosts() {
+      const rows = sortedHosts();
       hostsBody.innerHTML = "";
       if (!rows.length) {
         hostsBody.innerHTML = "<tr><td colspan='5' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
@@ -165,6 +242,29 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
           "<td>" + (h.confidence || "unknown") + "</td>" +
           "<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>";
         hostsBody.appendChild(tr);
+      }
+    }
+
+    function setSort(col) {
+      if (sort.col === col) {
+        sort.dir = (sort.dir === "asc") ? "desc" : "asc";
+      } else {
+        sort.col = col;
+        sort.dir = "asc";
+      }
+      updateHeaderIndicators();
+      renderHosts();
+    }
+
+    function updateHeaderIndicators() {
+      for (const th of tableHeaders) {
+        const col = th.getAttribute("data-col");
+        const active = col === sort.col;
+        th.setAttribute("aria-sort", active ? (sort.dir === "asc" ? "ascending" : "descending") : "none");
+        th.textContent = th.textContent.replace(/ [▲▼]$/, "");
+        if (active) {
+          th.textContent = th.textContent + (sort.dir === "asc" ? " ▲" : " ▼");
+        }
       }
     }
 
@@ -201,6 +301,16 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     startBtn.addEventListener("click", () => startScan().catch((e) => showError(e.message)));
     cancelBtn.addEventListener("click", () => cancelScan().catch((e) => showError(e.message)));
 
+    for (const th of tableHeaders) {
+      th.addEventListener("click", () => setSort(th.getAttribute("data-col")));
+      th.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setSort(th.getAttribute("data-col"));
+        }
+      });
+    }
+
     async function tick() {
       try {
         await loadStatus();
@@ -213,6 +323,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     (async function boot() {
       try {
         await initCSRF();
+        updateHeaderIndicators();
         await tick();
         setInterval(tick, 1500);
       } catch (e) {
