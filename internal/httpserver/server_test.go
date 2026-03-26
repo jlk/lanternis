@@ -119,6 +119,81 @@ func TestDuplicateScanStartReturnsConflict(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
+func TestScanStartRejectsCSRFTokenMismatch(t *testing.T) {
+	srv, _ := newTestServer(t)
+	_, cookie := csrfTokenAndCookie(t, srv)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/scan/start", bytes.NewBufferString(`{"cidr":"10.0.0.0/30","mode":"normal","concurrency":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", "definitely-not-the-cookie-token")
+	req.AddCookie(cookie)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestScanStartRejectsInvalidOrigin(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token, cookie := csrfTokenAndCookie(t, srv)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/scan/start", bytes.NewBufferString(`{"cidr":"10.0.0.0/30","mode":"normal","concurrency":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", token)
+	req.Header.Set("Origin", "http://evil.example")
+	req.AddCookie(cookie)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestScanStartRejectsInvalidCIDR(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token, cookie := csrfTokenAndCookie(t, srv)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/scan/start", bytes.NewBufferString(`{"cidr":"not-a-cidr","mode":"normal","concurrency":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", token)
+	req.AddCookie(cookie)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestScanCancelWhenIdleReturnsConflict(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token, cookie := csrfTokenAndCookie(t, srv)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/scan/cancel", nil)
+	req.Header.Set("X-CSRF-Token", token)
+	req.AddCookie(cookie)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWrongHTTPMethodReturnsNotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/scan/start", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func csrfTokenAndCookie(t *testing.T, srv *Server) (string, *http.Cookie) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/csrf", nil)

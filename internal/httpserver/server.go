@@ -281,7 +281,7 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		req.Concurrency = 32
 	}
 
-	runID, err := s.scanner.Start(r.Context(), req.CIDR, req.Concurrency, func(result discovery.Result) error {
+	_, err := s.scanner.Start(r.Context(), req.CIDR, req.Concurrency, func(result discovery.Result) error {
 		return s.store.UpsertHost(context.Background(), store.Host{
 			IP:           result.IP,
 			Reachability: result.Reachability,
@@ -312,7 +312,8 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 
 	go s.watchAndFinalize(dbRunID)
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"scan_id": runID,
+		// scan_id is the SQLite scan_runs primary key; the scanner's internal runID is not stable across runs.
+		"scan_id": dbRunID,
 		"status":  s.scanner.Status(),
 	})
 }
