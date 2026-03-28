@@ -11,6 +11,7 @@ This repository is **early**: specs and plans are in place; the **M1** vertical 
 | [`docs/INCEPTION.md`](docs/INCEPTION.md) | Why the project exists, principles, milestone summary |
 | [`docs/ENGINEERING-PLAN.md`](docs/ENGINEERING-PLAN.md) | Packages, security, SQLite audit, tests, failure modes |
 | [`docs/UI-PLAN.md`](docs/UI-PLAN.md) | Localhost console IA, states, accessibility, UI tokens |
+| [`DESIGN.md`](DESIGN.md) | Visual system: color, type, spacing, motion, dark mode (source of truth for UI code) |
 | [`TODOS.md`](TODOS.md) | Deferred work and follow-ups |
 
 Design deep-dives and some QA artifacts also live under **`~/.gstack/projects/lanternis/`** on the author’s machine (see links in `docs/INCEPTION.md`).

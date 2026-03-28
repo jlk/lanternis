@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lanternis — design preview</title>
+  <style>
+    :root {
+      --ln-bg: #f8f9fa;
+      --ln-surface: #ffffff;
+      --ln-text: #1a1a1a;
+      --ln-muted: #6c757d;
+      --ln-border: #dee2e6;
+      --ln-accent: #0d6efd;
+      --ln-warn-bg: #fff3cd;
+      --ln-warn-border: #ffe69c;
+      --ln-danger-text: #842029;
+    }
+    [data-theme="dark"] {
+      --ln-bg: #121416;
+      --ln-surface: #1a1d21;
+      --ln-text: #e8eaed;
+      --ln-muted: #9aa0a6;
+      --ln-border: #3c4043;
+      --ln-accent: #5c9eff;
+      --ln-warn-bg: #3d3200;
+      --ln-warn-border: #6b5a00;
+      --ln-danger-text: #f4a4a9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: var(--ln-bg);
+      color: var(--ln-text);
+      font-size: 14px;
+      line-height: 1.45;
+      transition: background 0.15s ease-out, color 0.15s ease-out;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 16px; }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.02em; }
+    .theme-toggle {
+      font: inherit;
+      padding: 8px 14px;
+      border-radius: 4px;
+      border: 1px solid var(--ln-border);
+      background: var(--ln-surface);
+      color: var(--ln-text);
+      cursor: pointer;
+      min-height: 44px;
+    }
+    .theme-toggle:focus-visible {
+      outline: 2px solid var(--ln-accent);
+      outline-offset: 2px;
+    }
+    .panel {
+      background: var(--ln-surface);
+      border: 1px solid var(--ln-border);
+      border-radius: 4px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    button.primary {
+      background: var(--ln-accent);
+      color: #fff;
+      border: 1px solid var(--ln-accent);
+      font: inherit;
+      padding: 8px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      min-height: 44px;
+    }
+    [data-theme="dark"] button.primary { color: #0d1117; }
+    button.ghost {
+      font: inherit;
+      padding: 8px 14px;
+      border-radius: 4px;
+      border: 1px solid var(--ln-border);
+      background: var(--ln-surface);
+      color: var(--ln-text);
+      min-height: 44px;
+    }
+    label { font-size: 14px; color: var(--ln-muted); }
+    select {
+      font: inherit;
+      padding: 8px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--ln-border);
+      background: var(--ln-surface);
+      color: var(--ln-text);
+    }
+    .muted { color: var(--ln-muted); }
+    .banner {
+      background: var(--ln-warn-bg);
+      border: 1px solid var(--ln-warn-border);
+      padding: 8px 10px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--ln-surface);
+    }
+    th, td {
+      text-align: left;
+      padding: 10px;
+      border-bottom: 1px solid var(--ln-border);
+      font-size: 14px;
+    }
+    th { font-weight: 600; }
+    .num { font-variant-numeric: tabular-nums; }
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .swatch {
+      border-radius: 4px;
+      border: 1px solid var(--ln-border);
+      overflow: hidden;
+      font-size: 12px;
+    }
+    .swatch .chip { height: 48px; }
+    .swatch .meta { padding: 8px; background: var(--ln-surface); }
+    h2 { font-size: 16px; margin: 24px 0 8px; font-weight: 600; }
+    h2:first-of-type { margin-top: 0; }
+    .specimen { margin: 8px 0; }
+    .specimen .label { font-size: 12px; color: var(--ln-muted); margin-bottom: 4px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; }
+    footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--ln-border); font-size: 13px; color: var(--ln-muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Lanternis</h1>
+      <button type="button" class="theme-toggle" id="themeBtn" aria-pressed="false">Light / Dark</button>
+    </header>
+
+    <p class="muted" style="margin:0 0 16px;">Design preview — system fonts only, no webfonts. Open <code>DESIGN.md</code> for tokens.</p>
+
+    <section class="panel" aria-labelledby="mock-title">
+      <h2 id="mock-title">Console mock</h2>
+      <p class="muted status" style="margin:0 0 12px;">127.0.0.1:8765 · Scan: <strong>Idle</strong> · Last: —:—</p>
+      <div class="controls" style="margin-bottom:12px;">
+        <button type="button" class="primary">Start scan</button>
+        <button type="button" class="ghost" disabled>Cancel</button>
+        <label>Mode <select><option>Normal</option><option>Light</option><option>Thorough</option></select></label>
+      </div>
+      <div class="banner" role="status"><strong>New open ports</strong> on 1 host since last scan — <a href="#" style="color:var(--ln-accent);">Review</a></div>
+      <table>
+        <caption class="muted" style="caption-side:top;text-align:left;padding-bottom:8px;">Devices on your network</caption>
+        <thead>
+          <tr><th scope="col">IP</th><th scope="col">Reach</th><th scope="col">Open ports</th><th scope="col">Confidence</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">192.168.1.1</td><td>reachable</td><td class="num">80, 443</td><td>unknown</td></tr>
+          <tr><td class="num">192.168.1.42</td><td>observed</td><td class="num">—</td><td>low</td></tr>
+        </tbody>
+      </table>
+      <footer>Only scans your configured network · Data stays on this computer</footer>
+    </section>
+
+    <h2>Type scale</h2>
+    <div class="panel">
+      <div class="specimen"><div class="label">Page title (22px)</div><div style="font-size:22px;font-weight:600;">Lanternis</div></div>
+      <div class="specimen"><div class="label">Body / table (14px)</div>Run a scan to list what responds—we’ll be honest about what we can’t name.</div>
+      <div class="specimen"><div class="label">Caption (13px)</div><span class="muted">Last scan completed at 14:32</span></div>
+      <div class="specimen"><div class="label">Monospace / diagnostics</div><code>{ "scan_id": 12, "phase": "done" }</code></div>
+    </div>
+
+    <h2>Palette</h2>
+    <div class="panel">
+      <div class="swatches" id="swatches"></div>
+    </div>
+  </div>
+  <script>
+    const tokens = [
+      ['--ln-bg', 'Background'],
+      ['--ln-surface', 'Surface'],
+      ['--ln-text', 'Text'],
+      ['--ln-muted', 'Muted'],
+      ['--ln-border', 'Border'],
+      ['--ln-accent', 'Accent'],
+      ['--ln-warn-bg', 'Warning bg'],
+      ['--ln-danger-text', 'Danger (evidence only)']
+    ];
+    const root = document.documentElement;
+    const btn = document.getElementById('themeBtn');
+    function paintSwatches() {
+      const el = document.getElementById('swatches');
+      el.innerHTML = '';
+      tokens.forEach(([name, label]) => {
+        const v = getComputedStyle(root).getPropertyValue(name).trim();
+        const d = document.createElement('div');
+        d.className = 'swatch';
+        d.innerHTML = '<div class="chip" style="background:'+v+'"></div><div class="meta"><strong>'+label+'</strong><br>'+name+'<br>'+v+'</div>';
+        el.appendChild(d);
+      });
+    }
+    function toggleTheme() {
+      const dark = root.getAttribute('data-theme') === 'dark';
+      if (dark) { root.removeAttribute('data-theme'); btn.setAttribute('aria-pressed', 'false'); }
+      else { root.setAttribute('data-theme', 'dark'); btn.setAttribute('aria-pressed', 'true'); }
+      paintSwatches();
+    }
+    btn.addEventListener('click', toggleTheme);
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      root.setAttribute('data-theme', 'dark');
+      btn.setAttribute('aria-pressed', 'true');
+    }
+    paintSwatches();
+  </script>
+</body>
+</html>
