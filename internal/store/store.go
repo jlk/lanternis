@@ -327,8 +327,9 @@ func (s *Store) SuggestedCIDR(ctx context.Context) (string, error) {
 	return v, nil
 }
 
-// CompleteFirstRun records acknowledgment and the chosen home-network CIDR.
-func (s *Store) CompleteFirstRun(ctx context.Context, cidr string) error {
+// CompleteFirstRun records acknowledgment, the chosen home-network CIDR, and an optional NVD API key
+// (stored locally in app_kv for future CVE/NVD features; never logged).
+func (s *Store) CompleteFirstRun(ctx context.Context, cidr, nvdAPIKey string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -341,7 +342,30 @@ func (s *Store) CompleteFirstRun(ctx context.Context, cidr string) error {
 	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO app_kv (key, value) VALUES (?, ?)`, "default_cidr", cidr); err != nil {
 		return err
 	}
+	key := strings.TrimSpace(nvdAPIKey)
+	if key != "" {
+		if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO app_kv (key, value) VALUES (?, ?)`, "nvd_api_key", key); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM app_kv WHERE key = ?`, "nvd_api_key"); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+// NVDAPIKeyConfigured reports whether a non-empty NVD API key is stored locally.
+func (s *Store) NVDAPIKeyConfigured(ctx context.Context) (bool, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM app_kv WHERE key = ?`, "nvd_api_key").Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(v) != "", nil
 }
 
 // AuditEvent is a row from audit_events (read-only diagnostics).
@@ -352,21 +376,14 @@ type AuditEvent struct {
 	PayloadJSON string    `json:"payload_json"`
 }
 
-// LastScanRun returns the most recent scan_runs row, or nil if none.
-func (s *Store) LastScanRun(ctx context.Context) (*ScanRun, error) {
+func parseScanRun(id int64, startedStr string, ended sql.NullString, mode string, cidr sql.NullString, cancel int) ScanRun {
 	var sr ScanRun
-	var startedStr string
-	var ended sql.NullString
-	var cancel int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, started_at, ended_at, mode, cidr, cancel_requested FROM scan_runs ORDER BY id DESC LIMIT 1`,
-	).Scan(&sr.ID, &startedStr, &ended, &sr.Mode, &sr.CIDR, &cancel)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+	sr.ID = id
+	sr.Mode = mode
+	if cidr.Valid {
+		sr.CIDR = cidr.String
 	}
-	if err != nil {
-		return nil, err
-	}
+	var err error
 	sr.StartedAt, err = time.Parse(time.RFC3339Nano, startedStr)
 	if err != nil {
 		sr.StartedAt, _ = time.Parse(time.RFC3339, startedStr)
@@ -379,7 +396,58 @@ func (s *Store) LastScanRun(ctx context.Context) (*ScanRun, error) {
 		sr.EndedAt = t
 	}
 	sr.CancelRequested = cancel != 0
+	return sr
+}
+
+// LastScanRun returns the most recent scan_runs row, or nil if none.
+func (s *Store) LastScanRun(ctx context.Context) (*ScanRun, error) {
+	var id int64
+	var startedStr string
+	var ended sql.NullString
+	var mode string
+	var cidr sql.NullString
+	var cancel int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, started_at, ended_at, mode, cidr, cancel_requested FROM scan_runs ORDER BY id DESC LIMIT 1`,
+	).Scan(&id, &startedStr, &ended, &mode, &cidr, &cancel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	sr := parseScanRun(id, startedStr, ended, mode, cidr, cancel)
 	return &sr, nil
+}
+
+// ListRecentScanRuns returns the newest scan runs (newest first), capped at 100.
+func (s *Store) ListRecentScanRuns(ctx context.Context, limit int) ([]ScanRun, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, started_at, ended_at, mode, cidr, cancel_requested FROM scan_runs ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScanRun, 0)
+	for rows.Next() {
+		var id int64
+		var startedStr string
+		var ended sql.NullString
+		var mode string
+		var cidr sql.NullString
+		var cancel int
+		if err := rows.Scan(&id, &startedStr, &ended, &mode, &cidr, &cancel); err != nil {
+			return nil, err
+		}
+		out = append(out, parseScanRun(id, startedStr, ended, mode, cidr, cancel))
+	}
+	return out, rows.Err()
 }
 
 // ListRecentAuditEvents returns the newest audit rows (newest first), capped at 100.

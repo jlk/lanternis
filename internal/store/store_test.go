@@ -237,6 +237,64 @@ func TestStoreScanRunAndCancelFlag(t *testing.T) {
 	}
 }
 
+func TestListRecentScanRuns(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := mustTestStore(t, ctx)
+	defer cleanup()
+	runs, err := st.ListRecentScanRuns(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListRecentScanRuns: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("expected no runs, got %d", len(runs))
+	}
+	id1, err := st.InsertScanRun(ctx, "normal", "10.0.0.0/24")
+	if err != nil {
+		t.Fatalf("InsertScanRun: %v", err)
+	}
+	id2, err := st.InsertScanRun(ctx, "light", "10.0.0.0/24")
+	if err != nil {
+		t.Fatalf("InsertScanRun: %v", err)
+	}
+	runs, err = st.ListRecentScanRuns(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListRecentScanRuns: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected 2 runs, got %d", len(runs))
+	}
+	if runs[0].ID != id2 || runs[1].ID != id1 {
+		t.Fatalf("expected newest first: got ids %d, %d", runs[0].ID, runs[1].ID)
+	}
+}
+
+func TestNVDAPIKeyConfigured(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := mustTestStore(t, ctx)
+	defer cleanup()
+	ok, err := st.NVDAPIKeyConfigured(ctx)
+	if err != nil {
+		t.Fatalf("NVDAPIKeyConfigured: %v", err)
+	}
+	if ok {
+		t.Fatal("expected no key")
+	}
+	if err := st.CompleteFirstRun(ctx, "192.168.1.0/24", "secret-key"); err != nil {
+		t.Fatalf("CompleteFirstRun: %v", err)
+	}
+	ok, err = st.NVDAPIKeyConfigured(ctx)
+	if err != nil || !ok {
+		t.Fatalf("expected key configured, ok=%v err=%v", ok, err)
+	}
+	if err := st.CompleteFirstRun(ctx, "192.168.1.0/24", "   "); err != nil {
+		t.Fatalf("CompleteFirstRun clear: %v", err)
+	}
+	ok, err = st.NVDAPIKeyConfigured(ctx)
+	if err != nil || ok {
+		t.Fatalf("expected key cleared, ok=%v err=%v", ok, err)
+	}
+}
+
 func mustTestStore(t *testing.T, ctx context.Context) (*Store, func()) {
 	t.Helper()
 	dir := t.TempDir()

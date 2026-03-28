@@ -43,6 +43,10 @@ func (s *Server) buildSupportBundle(ctx context.Context) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
+	nvdOK, err := s.store.NVDAPIKeyConfigured(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	byReach := map[string]int{}
 	hintsRows := 0
@@ -106,8 +110,9 @@ func (s *Server) buildSupportBundle(ctx context.Context) (map[string]any, error)
 			"db_filename": dbName,
 		},
 		"setup": map[string]any{
-			"first_run_complete": firstDone,
-			"suggested_cidr":     suggested,
+			"first_run_complete":     firstDone,
+			"suggested_cidr":         suggested,
+			"nvd_api_key_configured": nvdOK,
 		},
 		"scan_status": s.scanner.Status(),
 		"concurrency_modes": map[string]int{

@@ -30,7 +30,7 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 		_ = st.Close()
 		_ = os.Remove(dbPath)
 	})
-	if err := st.CompleteFirstRun(context.Background(), "10.0.0.0/30"); err != nil {
+	if err := st.CompleteFirstRun(context.Background(), "10.0.0.0/30", ""); err != nil {
 		t.Fatalf("complete first run: %v", err)
 	}
 	logger := log.New(io.Discard, "", 0)
@@ -319,6 +319,49 @@ func TestSetupStatusNeedsAckOnFreshDB(t *testing.T) {
 	}
 	if needs, ok := out["needs_ack"].(bool); !ok || !needs {
 		t.Fatalf("expected needs_ack true, got %+v", out)
+	}
+	if nvd, ok := out["nvd_api_key_configured"].(bool); !ok || nvd {
+		t.Fatalf("expected nvd_api_key_configured false on fresh DB, got %+v", out)
+	}
+}
+
+func TestScanRunsEndpoint(t *testing.T) {
+	srv, st := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/scan/runs", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var out struct {
+		Runs []json.RawMessage `json:"runs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Runs == nil {
+		t.Fatal("expected runs array")
+	}
+	id, err := st.InsertScanRun(context.Background(), "normal", "10.0.0.0/24")
+	if err != nil {
+		t.Fatalf("InsertScanRun: %v", err)
+	}
+	req2 := httptest.NewRequest(http.MethodGet, "/api/scan/runs", nil)
+	rec2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec2.Code)
+	}
+	var out2 struct {
+		Runs []struct {
+			ID int64 `json:"id"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &out2); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out2.Runs) != 1 || out2.Runs[0].ID != id {
+		t.Fatalf("expected run id %d, got %+v", id, out2.Runs)
 	}
 }
 

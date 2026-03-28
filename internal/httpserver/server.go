@@ -86,6 +86,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/support/export", s.requireCSRF(s.handleSupportExport))
 	s.mux.HandleFunc("/api/scan/diff", s.handleScanDiff)
 	s.mux.HandleFunc("/api/scan/diff/export", s.requireCSRF(s.handleScanDiffExport))
+	s.mux.HandleFunc("/api/scan/runs", s.handleScanRuns)
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
@@ -125,6 +126,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     #diffStrip { display: none; font-size: 14px; padding: 8px 10px; margin-bottom: 12px; background: var(--ln-surface); border: 1px dashed var(--ln-border); border-radius: 4px; }
     #portBanner { display: none; background: var(--ln-warn-bg); border: 1px solid var(--ln-warn-border); padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
     #portBanner .banner-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; }
+    #portBanner .banner-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+    #scanRunsPanel table { font-size: 13px; }
+    #scanRunsPanel td.num { white-space: nowrap; }
     .first-run-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
     .first-run-overlay.open { display: flex; }
     .first-run-card { max-width: 520px; width: 100%; }
@@ -148,7 +152,10 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     <div id="portBanner" role="region" aria-label="New open ports since last scan">
       <div class="banner-row">
         <span id="portBannerText"></span>
-        <button type="button" id="portBannerDismiss">Dismiss</button>
+        <span class="banner-actions">
+          <button type="button" id="portBannerSnooze">Snooze 24h</button>
+          <button type="button" id="portBannerDismiss">Dismiss until next scan</button>
+        </span>
       </div>
     </div>
 
@@ -156,8 +163,11 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       <div class="first-run-card panel">
         <h2 id="firstRunTitle">Before your first scan</h2>
         <p class="muted">Lanternis runs only on this computer. Inventory and audit events are stored in a local SQLite database file (see the <code>-db</code> flag). Nothing is sent to the cloud by default.</p>
+        <p class="muted">The app is designed to cap audit growth over time (for example, pruning events older than about 90 days or beyond roughly 100k rows—exact limits may evolve in a future release). Your scan inventory remains on disk until you delete the database.</p>
         <p class="muted">Only scan networks you own or are explicitly authorized to test. Unauthorized scanning may violate law or policy.</p>
         <label>Network range (CIDR) <input id="setupCidrInput" type="text" autocomplete="off" /></label>
+        <label>NVD API key <span class="muted">(optional)</span> <input id="setupNvdInput" type="password" autocomplete="off" placeholder="For future CVE lookups" title="Stored only in your local DB; not sent until you use a feature that calls NVD." /></label>
+        <p class="muted" style="font-size:13px;margin-top:-4px;">If you add a key, it stays on this machine. Lanternis does not upload it by default.</p>
         <label class="setup-check"><input type="checkbox" id="setupAck" /> I confirm I only scan networks I own or am authorized to test.</label>
         <div class="controls" style="margin-top: 8px;">
           <button type="button" id="setupContinueBtn" class="primary">Continue</button>
@@ -184,6 +194,24 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       </div>
       <p id="modeHint" class="muted" style="margin: 10px 0 0 0; font-size: 14px; line-height: 1.45;"></p>
     </section>
+
+    <details class="panel" id="scanRunsPanel">
+      <summary>Recent scans</summary>
+      <p class="muted" style="margin:0 0 8px 0; font-size:14px;">Completed and in-progress runs stored for this database (newest first).</p>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Started</th>
+            <th>Ended</th>
+            <th>Mode</th>
+            <th>CIDR</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="scanRunsBody"></tbody>
+      </table>
+    </details>
 
     <details class="panel">
       <summary>Scan modes &amp; what “reachability” means</summary>
@@ -236,6 +264,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const setupCidrInput = document.getElementById("setupCidrInput");
     const setupAck = document.getElementById("setupAck");
     const setupContinueBtn = document.getElementById("setupContinueBtn");
+    const setupNvdInput = document.getElementById("setupNvdInput");
     const hideUnknownReach = document.getElementById("hideUnknownReach");
     const hostCount = document.getElementById("hostCount");
     const modeHint = document.getElementById("modeHint");
@@ -248,6 +277,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const diffExportBtn = document.getElementById("diffExportBtn");
     const STORAGE_THEME = "ln_theme";
     const STORAGE_PORT_DISMISS = "ln_port_banner_dismiss_scan_id";
+    const STORAGE_PORT_SNOOZE = "ln_port_banner_snooze_until";
+    const scanRunsBody = document.getElementById("scanRunsBody");
+    const portBannerSnooze = document.getElementById("portBannerSnooze");
 
     let currentHosts = [];
     let sort = { col: "ip", dir: "asc" };
@@ -338,7 +370,11 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       await fetchJSON("/api/setup/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-        body: JSON.stringify({ cidr: cidr, acknowledged: true })
+        body: JSON.stringify({
+          cidr: cidr,
+          acknowledged: true,
+          nvd_api_key: (setupNvdInput && setupNvdInput.value) ? setupNvdInput.value.trim() : ""
+        })
       });
       firstRunOverlay.classList.remove("open");
       setupDone = true;
@@ -599,6 +635,17 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         portBanner.style.display = "none";
         return;
       }
+      const snoozeUntil = localStorage.getItem(STORAGE_PORT_SNOOZE);
+      if (snoozeUntil) {
+        const t = parseInt(snoozeUntil, 10);
+        if (!Number.isNaN(t)) {
+          if (Date.now() < t) {
+            portBanner.style.display = "none";
+            return;
+          }
+          localStorage.removeItem(STORAGE_PORT_SNOOZE);
+        }
+      }
       const sid = d.current_scan_id || 0;
       if (localStorage.getItem(STORAGE_PORT_DISMISS) === String(sid)) {
         portBanner.style.display = "none";
@@ -620,11 +667,46 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       }
     }
 
+    function renderScanRuns(data) {
+      if (!scanRunsBody) return;
+      const runs = (data && data.runs) || [];
+      scanRunsBody.innerHTML = "";
+      if (!runs.length) {
+        scanRunsBody.innerHTML = "<tr><td colspan='6' class='muted'>No scans yet.</td></tr>";
+        return;
+      }
+      for (const r of runs) {
+        const tr = document.createElement("tr");
+        const ended = r.ended_at ? new Date(r.ended_at).toLocaleString() : "—";
+        const st = r.cancel_requested ? "Cancelled" : (r.ended_at ? "Done" : "Running");
+        tr.innerHTML =
+          "<td class='num'>" + (r.id || "") + "</td>" +
+          "<td class='num'>" + (r.started_at ? new Date(r.started_at).toLocaleString() : "") + "</td>" +
+          "<td class='num'>" + ended + "</td>" +
+          "<td>" + (r.mode || "") + "</td>" +
+          "<td class='num'>" + (r.cidr || "") + "</td>" +
+          "<td>" + st + "</td>";
+        scanRunsBody.appendChild(tr);
+      }
+    }
+
+    async function loadScanRuns() {
+      try {
+        const data = await fetchJSON("/api/scan/runs");
+        renderScanRuns(data);
+      } catch (e) {
+        if (scanRunsBody) {
+          scanRunsBody.innerHTML = "<tr><td colspan='6' class='muted'>Could not load scan history.</td></tr>";
+        }
+      }
+    }
+
     async function tick() {
       try {
         await loadStatus();
         await loadHosts();
         await loadDiff();
+        await loadScanRuns();
       } catch (e) {
         showError(e.message);
       }
@@ -640,6 +722,11 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         localStorage.setItem(STORAGE_THEME, "dark");
       }
       syncThemeToggleLabel();
+    });
+    portBannerSnooze.addEventListener("click", () => {
+      const until = Date.now() + 24 * 60 * 60 * 1000;
+      localStorage.setItem(STORAGE_PORT_SNOOZE, String(until));
+      portBanner.style.display = "none";
     });
     portBannerDismiss.addEventListener("click", () => {
       fetchJSON("/api/scan/diff").then((d) => {
@@ -751,15 +838,22 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	nvdOK, err := s.store.NVDAPIKeyConfigured(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"needs_ack":      !done,
-		"suggested_cidr": suggested,
+		"needs_ack":              !done,
+		"suggested_cidr":         suggested,
+		"nvd_api_key_configured": nvdOK,
 	})
 }
 
 type setupCompleteReq struct {
 	CIDR         string `json:"cidr"`
 	Acknowledged bool   `json:"acknowledged"`
+	NVDAPIKey    string `json:"nvd_api_key"`
 }
 
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
@@ -780,7 +874,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("invalid CIDR"))
 		return
 	}
-	if err := s.store.CompleteFirstRun(r.Context(), req.CIDR); err != nil {
+	if err := s.store.CompleteFirstRun(r.Context(), req.CIDR, req.NVDAPIKey); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
