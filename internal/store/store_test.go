@@ -214,7 +214,7 @@ func TestStoreScanRunAndCancelFlag(t *testing.T) {
 	st, cleanup := mustTestStore(t, ctx)
 	defer cleanup()
 
-	id, err := st.InsertScanRun(ctx, "normal")
+	id, err := st.InsertScanRun(ctx, "normal", "192.168.1.0/24")
 	if err != nil {
 		t.Fatalf("InsertScanRun: %v", err)
 	}

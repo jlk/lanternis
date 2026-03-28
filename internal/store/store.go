@@ -33,6 +33,7 @@ type ScanRun struct {
 	StartedAt       time.Time `json:"started_at"`
 	EndedAt         time.Time `json:"ended_at,omitempty"`
 	Mode            string    `json:"mode"`
+	CIDR            string    `json:"cidr,omitempty"`
 	CancelRequested bool      `json:"cancel_requested"`
 }
 
@@ -102,7 +103,13 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureHostsOpenPortColumn(ctx); err != nil {
 		return err
 	}
-	return s.ensureHostsOpenPortsJSONColumn(ctx)
+	if err := s.ensureHostsOpenPortsJSONColumn(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureScanRunsCIDRColumn(ctx); err != nil {
+		return err
+	}
+	return s.ensureScanHostSnapshotsTable(ctx)
 }
 
 func (s *Store) ensureHostsOpenPortColumn(ctx context.Context) error {
@@ -139,9 +146,9 @@ func (s *Store) ensureHostsOpenPortsJSONColumn(ctx context.Context) error {
 	return err
 }
 
-func (s *Store) InsertScanRun(ctx context.Context, mode string) (int64, error) {
+func (s *Store) InsertScanRun(ctx context.Context, mode, cidr string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.db.ExecContext(ctx, `INSERT INTO scan_runs (started_at, mode) VALUES (?, ?)`, now, mode)
+	res, err := s.db.ExecContext(ctx, `INSERT INTO scan_runs (started_at, mode, cidr) VALUES (?, ?, ?)`, now, mode, cidr)
 	if err != nil {
 		return 0, err
 	}
@@ -352,8 +359,8 @@ func (s *Store) LastScanRun(ctx context.Context) (*ScanRun, error) {
 	var ended sql.NullString
 	var cancel int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, started_at, ended_at, mode, cancel_requested FROM scan_runs ORDER BY id DESC LIMIT 1`,
-	).Scan(&sr.ID, &startedStr, &ended, &sr.Mode, &cancel)
+		`SELECT id, started_at, ended_at, mode, cidr, cancel_requested FROM scan_runs ORDER BY id DESC LIMIT 1`,
+	).Scan(&sr.ID, &startedStr, &ended, &sr.Mode, &sr.CIDR, &cancel)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
