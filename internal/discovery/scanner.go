@@ -14,6 +14,8 @@ type Result struct {
 	ObservedAt   time.Time `json:"observed_at"`
 	Confidence   string    `json:"confidence"`
 	Reachability string    `json:"reachability"`
+	// OpenPorts lists every TCP port that accepted a connect (default build), or {"icmp"} for integration ICMP probe.
+	OpenPorts []string `json:"open_ports,omitempty"`
 }
 
 type Status struct {
@@ -22,6 +24,14 @@ type Status struct {
 	Completed       int    `json:"completed"`
 	Total           int    `json:"total"`
 	CancelSupported bool   `json:"cancel_supported"`
+}
+
+// ScanOptions configures a sweep. Zero value: concurrency 32, TCP profile normal.
+type ScanOptions struct {
+	Concurrency int
+	// TCPProfile is light | normal | thorough (default TCP build); maps to port lists and timeouts.
+	// Ignored when built with the integration tag (ICMP probe).
+	TCPProfile string
 }
 
 type Scanner struct {
@@ -46,7 +56,7 @@ func NewScanner() *Scanner {
 	}
 }
 
-func (s *Scanner) Start(ctx context.Context, cidr string, concurrency int, onResult func(Result) error) (int64, error) {
+func (s *Scanner) Start(ctx context.Context, cidr string, opts ScanOptions, onResult func(Result) error) (int64, error) {
 	s.mu.Lock()
 	if s.status.Running {
 		s.mu.Unlock()
@@ -57,20 +67,25 @@ func (s *Scanner) Start(ctx context.Context, cidr string, concurrency int, onRes
 		s.mu.Unlock()
 		return 0, err
 	}
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = 32
+	}
+	tcpProfile := NormalizeTCPProfile(opts.TCPProfile)
 	scanCtx, cancel := context.WithCancel(ctx)
 	s.cancelFn = cancel
 	s.lastRunID++
 	runID := s.lastRunID
 	s.status = Status{
 		Running:         true,
-		ScanPhase:       "icmp",
+		ScanPhase:       "probe",
 		Completed:       0,
 		Total:           len(ips),
 		CancelSupported: true,
 	}
 	s.mu.Unlock()
 
-	go s.scan(scanCtx, ips, concurrency, onResult, runID)
+	go s.scan(scanCtx, ips, concurrency, tcpProfile, onResult, runID)
 	return runID, nil
 }
 
@@ -90,12 +105,12 @@ func (s *Scanner) probeLogf(format string, args ...any) {
 	}
 }
 
-func (s *Scanner) scan(ctx context.Context, ips []string, concurrency int, onResult func(Result) error, runID int64) {
+func (s *Scanner) scan(ctx context.Context, ips []string, concurrency int, tcpProfile string, onResult func(Result) error, runID int64) {
 	if concurrency <= 0 {
 		concurrency = 32
 	}
-	s.probeLogf("scan run_id=%d hosts=%d concurrency=%d first_ip=%s last_ip=%s",
-		runID, len(ips), concurrency, firstIP(ips), lastIP(ips))
+	s.probeLogf("scan run_id=%d hosts=%d concurrency=%d tcp_profile=%s first_ip=%s last_ip=%s",
+		runID, len(ips), concurrency, tcpProfile, firstIP(ips), lastIP(ips))
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
@@ -112,9 +127,9 @@ func (s *Scanner) scan(ctx context.Context, ips []string, concurrency int, onRes
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			reachable := pingHost(ctx, ip)
-			s.probeLogf("probe run_id=%d ip=%s reachable=%t reachability=%s",
-				runID, ip, reachable, map[bool]string{true: "reachable", false: "unknown"}[reachable])
+			reachable, openPorts := probeReachable(ctx, ip, tcpProfile)
+			s.probeLogf("probe run_id=%d ip=%s tcp_profile=%s reachable=%t open_ports=%v reachability=%s",
+				runID, ip, tcpProfile, reachable, openPorts, map[bool]string{true: "reachable", false: "unknown"}[reachable])
 			now := time.Now().UTC()
 			_ = onResult(Result{
 				IP:           ip,
@@ -122,6 +137,7 @@ func (s *Scanner) scan(ctx context.Context, ips []string, concurrency int, onRes
 				ObservedAt:   now,
 				Confidence:   "unknown",
 				Reachability: map[bool]string{true: "reachable", false: "unknown"}[reachable],
+				OpenPorts:    openPorts,
 			})
 			s.incrementCompleted()
 		}(ip)

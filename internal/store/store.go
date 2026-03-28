@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +21,7 @@ type Store struct {
 type Host struct {
 	IP           string          `json:"ip"`
 	Reachability string          `json:"reachability"`
+	OpenPorts    []string        `json:"open_ports,omitempty"`
 	Label        string          `json:"label"`
 	Confidence   string          `json:"confidence"`
 	LastSeen     time.Time       `json:"last_seen"`
@@ -66,6 +69,8 @@ func (s *Store) migrate(ctx context.Context) error {
 			ip TEXT PRIMARY KEY,
 			last_seen TEXT NOT NULL,
 			reachability TEXT NOT NULL,
+			open_port TEXT NOT NULL DEFAULT '',
+			open_ports_json TEXT NOT NULL DEFAULT '[]',
 			raw_hints_json TEXT NOT NULL DEFAULT '{}',
 			confidence TEXT NOT NULL,
 			fingerprint_blob TEXT NOT NULL DEFAULT '',
@@ -94,7 +99,44 @@ func (s *Store) migrate(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	if err := s.ensureHostsOpenPortColumn(ctx); err != nil {
+		return err
+	}
+	return s.ensureHostsOpenPortsJSONColumn(ctx)
+}
+
+func (s *Store) ensureHostsOpenPortColumn(ctx context.Context) error {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name = 'open_port'`).Scan(&n)
+	if err != nil {
+		return fmt.Errorf("pragma hosts: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err = s.db.ExecContext(ctx, `ALTER TABLE hosts ADD COLUMN open_port TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+func (s *Store) ensureHostsOpenPortsJSONColumn(ctx context.Context) error {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name = 'open_ports_json'`).Scan(&n)
+	if err != nil {
+		return fmt.Errorf("pragma hosts open_ports_json: %w", err)
+	}
+	if n == 0 {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE hosts ADD COLUMN open_ports_json TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return err
+		}
+	}
+	// Backfill from legacy single open_port column (one-time per row).
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE hosts
+		SET open_ports_json = json_array(open_port)
+		WHERE open_port != ''
+		  AND (open_ports_json IS NULL OR open_ports_json = '' OR open_ports_json = '[]')
+	`)
+	return err
 }
 
 func (s *Store) InsertScanRun(ctx context.Context, mode string) (int64, error) {
@@ -129,18 +171,24 @@ func (s *Store) UpsertHost(ctx context.Context, h Host) error {
 			reach = "observed"
 		}
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO hosts (ip, last_seen, reachability, confidence, label)
-		VALUES (?, ?, ?, ?, ?)
+	portsJSON, err := marshalOpenPortsJSON(h.OpenPorts)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO hosts (ip, last_seen, reachability, open_ports_json, confidence, label)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(ip) DO UPDATE SET
 			last_seen = excluded.last_seen,
 			reachability = excluded.reachability,
+			open_ports_json = excluded.open_ports_json,
 			confidence = excluded.confidence,
 			label = excluded.label
 	`,
 		h.IP,
 		h.LastSeen.UTC().Format(time.RFC3339Nano),
 		reach,
+		portsJSON,
 		h.Confidence,
 		h.Label,
 	)
@@ -149,7 +197,7 @@ func (s *Store) UpsertHost(ctx context.Context, h Host) error {
 
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT ip, reachability, label, confidence, last_seen, raw_hints_json
+		SELECT ip, reachability, open_ports_json, open_port, label, confidence, last_seen, raw_hints_json
 		FROM hosts
 		ORDER BY ip ASC
 	`)
@@ -161,11 +209,17 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	out := make([]Host, 0)
 	for rows.Next() {
 		var h Host
+		var portsJSON, legacyOpenPort string
 		var lastSeen string
 		var rawHints sql.NullString
-		if err := rows.Scan(&h.IP, &h.Reachability, &h.Label, &h.Confidence, &lastSeen, &rawHints); err != nil {
+		if err := rows.Scan(&h.IP, &h.Reachability, &portsJSON, &legacyOpenPort, &h.Label, &h.Confidence, &lastSeen, &rawHints); err != nil {
 			return nil, err
 		}
+		h.OpenPorts = decodeOpenPortsJSON(portsJSON)
+		if len(h.OpenPorts) == 0 && legacyOpenPort != "" {
+			h.OpenPorts = []string{legacyOpenPort}
+		}
+		sortOpenPortsNumeric(h.OpenPorts)
 		if t, err := time.Parse(time.RFC3339Nano, lastSeen); err == nil {
 			h.LastSeen = t
 		}
@@ -175,6 +229,42 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 		out = append(out, h)
 	}
 	return out, rows.Err()
+}
+
+func marshalOpenPortsJSON(ports []string) (string, error) {
+	if len(ports) == 0 {
+		return "[]", nil
+	}
+	b, err := json.Marshal(ports)
+	if err != nil {
+		return "[]", err
+	}
+	return string(b), nil
+}
+
+func decodeOpenPortsJSON(s string) []string {
+	if s == "" || s == "[]" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func sortOpenPortsNumeric(ports []string) {
+	if len(ports) < 2 {
+		return
+	}
+	sort.Slice(ports, func(i, j int) bool {
+		a, ea := strconv.Atoi(ports[i])
+		b, eb := strconv.Atoi(ports[j])
+		if ea != nil || eb != nil {
+			return ports[i] < ports[j]
+		}
+		return a < b
+	})
 }
 
 func (s *Store) InsertAuditEvent(ctx context.Context, eventType string, payloadJSON string) error {

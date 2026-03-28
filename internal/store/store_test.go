@@ -133,6 +133,7 @@ func TestStoreUpsertAndListHosts(t *testing.T) {
 	h := Host{
 		IP:           "192.168.1.10",
 		Reachability: "reachable",
+		OpenPorts:    []string{"443", "80"},
 		Label:        "router",
 		Confidence:   "high",
 		LastSeen:     now,
@@ -148,8 +149,23 @@ func TestStoreUpsertAndListHosts(t *testing.T) {
 	if len(hosts) != 1 {
 		t.Fatalf("expected 1 host, got %d", len(hosts))
 	}
-	if hosts[0].IP != h.IP || hosts[0].Reachability != h.Reachability || hosts[0].Label != h.Label || hosts[0].Confidence != h.Confidence {
+	if hosts[0].IP != h.IP || hosts[0].Reachability != h.Reachability || len(hosts[0].OpenPorts) != 2 ||
+		hosts[0].OpenPorts[0] != "80" || hosts[0].OpenPorts[1] != "443" {
 		t.Fatalf("unexpected host row: %+v", hosts[0])
+	}
+
+	// Later scan: unknown clears open ports from Upsert.
+	if err := st.UpsertHost(ctx, Host{
+		IP: h.IP, Reachability: "unknown", OpenPorts: nil, Label: h.Label, Confidence: "unknown", LastSeen: now,
+	}); err != nil {
+		t.Fatalf("UpsertHost second: %v", err)
+	}
+	hosts2, err := st.ListHosts(ctx)
+	if err != nil {
+		t.Fatalf("ListHosts: %v", err)
+	}
+	if len(hosts2) != 1 || len(hosts2[0].OpenPorts) != 0 {
+		t.Fatalf("expected open_ports cleared, got %+v", hosts2[0])
 	}
 }
 
@@ -234,7 +250,7 @@ func mustTestStore(t *testing.T, ctx context.Context) (*Store, func()) {
 
 // dbQueryRow is a tiny test-only helper by using the unexported db field.
 func (s *Store) dbQueryRow(ctx context.Context, query string, args ...any) (struct {
-	endedAt          time.Time
+	endedAt         time.Time
 	cancelRequested int
 }, error) {
 	type scanRow struct {
@@ -244,14 +260,13 @@ func (s *Store) dbQueryRow(ctx context.Context, query string, args ...any) (stru
 	var r scanRow
 	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&r.endedAtStr, &r.cancelRequested); err != nil {
 		return struct {
-			endedAt          time.Time
+			endedAt         time.Time
 			cancelRequested int
 		}{}, err
 	}
 	endedAt, _ := time.Parse(time.RFC3339Nano, r.endedAtStr)
 	return struct {
-		endedAt          time.Time
+		endedAt         time.Time
 		cancelRequested int
 	}{endedAt: endedAt, cancelRequested: r.cancelRequested}, nil
 }
-

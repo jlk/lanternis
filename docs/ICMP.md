@@ -1,6 +1,18 @@
-# ICMP probing (integration build)
+# Active reachability: TCP (default) vs ICMP (integration)
 
-Lanternis uses a **safe TCP connect hint** by default to avoid raw-socket permission issues during development.
+Lanternis has two probe strategies:
+
+| | **Default build** | **`integration` build** |
+|---|-------------------|-------------------------|
+| **Mechanism** | **Option B — TCP connect** to curated home/IoT ports (in parallel, per-host deadline), not a full port scan | **Option A — ICMP echo** (raw socket) |
+| **Permissions** | Unprivileged | Often **root** / `CAP_NET_RAW` (see below) |
+| **Tradeoff** | Misses silent hosts with no matching ports open; polite | Closer to a classic “ping sweep” |
+
+**Scan modes** (`light` / `normal` / `thorough`) control both **parallel host workers** and **TCP port breadth** (see `internal/discovery/tcp_probe.go`: `PortsForTCPProfile` / `TCPProfileLight|Normal|Thorough`). The integration build ignores TCP profiles and uses ICMP only.
+
+Diagnostics (`GET /api/diagnostics`) includes `tcp_probe_profiles` with the port lists per mode (default build).
+
+Per-host results: **`GET /api/hosts`** includes **`open_ports`** (JSON array of strings): every probe-list port that accepted a TCP connect for that scan, sorted numerically. ICMP builds use `["icmp"]` when echo reply was seen.
 
 If you want **real ICMP echo** probing, build/run with the `integration` build tag:
 

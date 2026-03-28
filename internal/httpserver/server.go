@@ -150,10 +150,10 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         <button id="cancelBtn">Cancel</button>
         <label title="IPv4 network in CIDR form (e.g. 192.168.1.0/24). Only this range is scanned.">CIDR <input id="cidrInput" value="192.168.1.0/24" autocomplete="off" spellcheck="false" /></label>
         <label>Mode
-          <select id="modeSelect" title="Controls how many hosts are probed in parallel (politeness vs speed).">
-            <option value="light" title="12 parallel probes — gentlest on your LAN; slowest on large subnets.">light</option>
-            <option value="normal" title="32 parallel probes — balanced default." selected>normal</option>
-            <option value="thorough" title="48 parallel probes — fastest scan; more load on CPU and network.">thorough</option>
+          <select id="modeSelect" title="Parallel host workers and TCP port breadth (politeness vs coverage). ICMP build ignores port lists.">
+            <option value="light" title="12 parallel host probes; smallest TCP port set (web-focused).">light</option>
+            <option value="normal" title="32 parallel; balanced TCP port list (web + common IoT)." selected>normal</option>
+            <option value="thorough" title="48 parallel; widest TCP port list; more traffic per host.">thorough</option>
           </select>
         </label>
         <span id="statusText" class="status muted" aria-live="polite">Status: idle</span>
@@ -165,9 +165,10 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     <details class="panel">
       <summary>Scan modes &amp; what “reachability” means</summary>
       <ul>
-        <li><strong>light</strong> — Fewest parallel probes (12). Use on busy networks or when you want minimal impact.</li>
-        <li><strong>normal</strong> — Default balance (32). Good starting point for most home /24 networks.</li>
-        <li><strong>thorough</strong> — Most parallel probes (48). Finishes sooner; more CPU and traffic.</li>
+        <li><strong>light</strong> — Fewest parallel <em>host</em> workers (12) and the <strong>smallest TCP port set</strong> (HTTP/S-focused). Gentlest on busy LANs.</li>
+        <li><strong>normal</strong> — Default balance (32 workers; web + common IoT ports like RTSP/UPnP-alt).</li>
+        <li><strong>thorough</strong> — Most workers (48) and the <strong>widest TCP port set</strong> (adds SSH, SMB, MQTT, Home Assistant, etc.). Finishes sooner per host batch; more traffic.</li>
+        <li><strong>Open ports</strong> — All probe-list ports that accepted a TCP connect in the current mode (not a full port map). ICMP builds show <code>icmp</code> when echo reply was seen. Empty when the probe got no reply.</li>
         <li><strong>Reachability</strong> — What we could infer from the active probe (e.g. TCP connect or ICMP). <strong>Observed</strong> means we saw the host via passive discovery (ARP, mDNS, or SSDP) but the active probe did not get a reply. <strong>Unknown</strong> often means “no reply to our probe” and no passive hints yet — not “offline for sure.” Hidden rows may still be interesting later (M1a fingerprints, etc.).</li>
         <li><strong>Hints</strong> — Passive clues merged from this machine after you start a scan: ARP (Linux/macOS), local SSDP (UPnP discovery), and mDNS names heard on the LAN. They do not replace reachability from probes.</li>
       </ul>
@@ -184,6 +185,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
           <tr>
             <th data-col="ip" role="button" tabindex="0" title="Sort by IP">IP</th>
             <th data-col="reachability" role="button" tabindex="0" title="Sort by reachability">Reachability</th>
+            <th data-col="open_ports" role="button" tabindex="0" title="Sort by open ports (active probe)">Open ports</th>
             <th data-col="label" role="button" tabindex="0" title="Sort by label">Label</th>
             <th data-col="confidence" role="button" tabindex="0" title="Sort by confidence">Confidence</th>
             <th data-col="last_seen" role="button" tabindex="0" title="Sort by last seen">Last seen</th>
@@ -221,9 +223,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     let setupDone = false;
 
     const modeHints = {
-      light: "Light: 12 parallel probes — gentlest on your LAN; slowest on large subnets.",
-      normal: "Normal: 32 parallel probes — balanced default for most /24 home networks.",
-      thorough: "Thorough: 48 parallel probes — faster finish; more CPU and network load."
+      light: "Light: 12 parallel host probes + smallest TCP port set (web).",
+      normal: "Normal: 32 parallel + balanced TCP ports (web + common IoT).",
+      thorough: "Thorough: 48 parallel + widest TCP port list (more services probed per host)."
     };
 
     function refreshModeHint() {
@@ -391,6 +393,11 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       return "";
     }
 
+    function openPortsSortKey(h) {
+      if (!h.open_ports || !h.open_ports.length) return "";
+      return h.open_ports.slice().sort().join(",");
+    }
+
     function sortedHosts() {
       const rows = (currentHosts || []).slice();
       rows.sort((a, b) => {
@@ -403,6 +410,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         }
         if (sort.col === "confidence") return dir * (rankConfidence(a.confidence) - rankConfidence(b.confidence));
         if (sort.col === "reachability") return dir * (rankReachability(a.reachability) - rankReachability(b.reachability));
+        if (sort.col === "open_ports") return dir * openPortsSortKey(a).localeCompare(openPortsSortKey(b));
         if (sort.col === "hints") return dir * hintSummary(a).localeCompare(hintSummary(b));
         const av = String((a[sort.col] ?? "")).toLowerCase();
         const bv = String((b[sort.col] ?? "")).toLowerCase();
@@ -428,14 +436,14 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       hostsBody.innerHTML = "";
       if (!total) {
         hostCount.textContent = "";
-        hostsBody.innerHTML = "<tr><td colspan='6' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
+        hostsBody.innerHTML = "<tr><td colspan='7' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
         return;
       }
       if (!rows.length) {
         if (hideUnknownReach.checked && hiddenUnknown > 0) {
-          hostsBody.innerHTML = "<tr><td colspan='6' class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
+          hostsBody.innerHTML = "<tr><td colspan='7' class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
         } else {
-          hostsBody.innerHTML = "<tr><td colspan='6' class='muted'>No rows to show.</td></tr>";
+          hostsBody.innerHTML = "<tr><td colspan='7' class='muted'>No rows to show.</td></tr>";
         }
         hostCount.textContent = "Showing 0 of " + total + (hiddenUnknown ? " (" + hiddenUnknown + " hidden)" : "");
         return;
@@ -446,6 +454,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         tr.innerHTML =
           "<td>" + (h.ip || "") + "</td>" +
           "<td>" + (h.reachability || "unknown") + "</td>" +
+          "<td class='muted'>" + (Array.isArray(h.open_ports) && h.open_ports.length ? h.open_ports.join(", ") : "—") + "</td>" +
           "<td>" + (h.label || "Unknown") + "</td>" +
           "<td>" + (h.confidence || "unknown") + "</td>" +
           "<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>" +
@@ -694,10 +703,14 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 
 	// Important: do not bind the scan lifetime to the HTTP request context.
 	// Request contexts are cancelled when the handler returns, which would immediately cancel the scan.
-	scanRunID, err := s.scanner.Start(context.Background(), req.CIDR, req.Concurrency, func(result discovery.Result) error {
+	scanRunID, err := s.scanner.Start(context.Background(), req.CIDR, discovery.ScanOptions{
+		Concurrency: req.Concurrency,
+		TCPProfile:  req.Mode,
+	}, func(result discovery.Result) error {
 		return s.store.UpsertHost(context.Background(), store.Host{
 			IP:           result.IP,
 			Reachability: result.Reachability,
+			OpenPorts:    result.OpenPorts,
 			Label:        "",
 			Confidence:   result.Confidence,
 			LastSeen:     result.ObservedAt,
@@ -741,9 +754,9 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 
 // passiveOutcome is merge counts from one passive discovery pass (ARP / SSDP / mDNS).
 type passiveOutcome struct {
-	ARP   int
-	SSDP  int
-	MDNS  int
+	ARP  int
+	SSDP int
+	MDNS int
 }
 
 func (s *Server) runPassiveDiscovery(cidr string, done chan<- passiveOutcome) {

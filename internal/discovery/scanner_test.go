@@ -36,12 +36,12 @@ func TestScannerSecondStartReturnsConflict(t *testing.T) {
 	defer cancel()
 
 	// Use /32 so the scan finishes quickly (connection refused should be immediate).
-	_, err := s.Start(ctx, "127.0.0.1/32", 1, func(Result) error { return nil })
+	_, err := s.Start(ctx, "127.0.0.1/32", ScanOptions{Concurrency: 1}, func(Result) error { return nil })
 	if err != nil {
 		t.Fatalf("first Start: %v", err)
 	}
 
-	_, err = s.Start(ctx, "127.0.0.1/32", 1, func(Result) error { return nil })
+	_, err = s.Start(ctx, "127.0.0.1/32", ScanOptions{Concurrency: 1}, func(Result) error { return nil })
 	if err == nil || err.Error() != "scan already running" {
 		t.Fatalf("expected conflict error, got: %v", err)
 	}
@@ -50,4 +50,3 @@ func TestScannerSecondStartReturnsConflict(t *testing.T) {
 	_ = s.Cancel()
 	time.Sleep(50 * time.Millisecond)
 }
-

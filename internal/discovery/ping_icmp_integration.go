@@ -14,7 +14,7 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-func pingHost(ctx context.Context, ip string) bool {
+func icmpProbe(ctx context.Context, ip string) bool {
 	dst := net.ParseIP(ip)
 	if dst == nil || dst.To4() == nil {
 		return false
@@ -86,4 +86,3 @@ func randomSeq() int {
 	}
 	return int(binary.BigEndian.Uint16(b[:]))
 }
-

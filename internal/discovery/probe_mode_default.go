@@ -7,6 +7,5 @@ func ProbeMode() string {
 }
 
 func ProbeGuidance() string {
-	return "Using TCP fallback probe. For real ICMP echo, run with -tags=integration (and required OS permissions)."
+	return "Using TCP connect probes; scan mode (light/normal/thorough) selects parallel host workers and port list (see tcp_probe_profiles in diagnostics). For ICMP echo, run with -tags=integration (and required OS permissions)."
 }
-

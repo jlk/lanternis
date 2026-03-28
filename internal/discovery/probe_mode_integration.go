@@ -9,4 +9,3 @@ func ProbeMode() string {
 func ProbeGuidance() string {
 	return "Using ICMP echo probe (integration build). Root/CAP_NET_RAW may be required depending on OS."
 }
-
