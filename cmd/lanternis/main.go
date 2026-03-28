@@ -15,6 +15,9 @@ import (
 	"github.com/jlk/lanternis/internal/store"
 )
 
+// Set at link time, e.g. go build -ldflags "-X main.version=1.2.3"
+var version = "dev"
+
 func main() {
 	var (
 		addr   = flag.String("addr", "127.0.0.1:8080", "HTTP listen address (loopback only)")
@@ -32,7 +35,10 @@ func main() {
 	defer st.Close()
 
 	scanner := discovery.NewScanner()
-	srv := httpserver.New(logger, st, scanner)
+	srv := httpserver.New(logger, st, scanner, httpserver.Config{
+		DBPath:  *dbPath,
+		Version: version,
+	})
 
 	httpSrv := &http.Server{
 		Addr:              *addr,

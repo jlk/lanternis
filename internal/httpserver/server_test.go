@@ -33,7 +33,7 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 		t.Fatalf("complete first run: %v", err)
 	}
 	logger := log.New(io.Discard, "", 0)
-	return New(logger, st, discovery.NewScanner()), st
+	return New(logger, st, discovery.NewScanner(), Config{DBPath: dbPath, Version: "test"}), st
 }
 
 func newTestServerWithoutFirstRun(t *testing.T) (*Server, *store.Store) {
@@ -49,7 +49,7 @@ func newTestServerWithoutFirstRun(t *testing.T) (*Server, *store.Store) {
 		_ = os.Remove(dbPath)
 	})
 	logger := log.New(io.Discard, "", 0)
-	return New(logger, st, discovery.NewScanner()), st
+	return New(logger, st, discovery.NewScanner(), Config{DBPath: dbPath, Version: "test"}), st
 }
 
 func TestScanStartRequiresCSRF(t *testing.T) {
@@ -210,6 +210,36 @@ func TestWrongHTTPMethodReturnsNotFound(t *testing.T) {
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDiagnosticsEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/diagnostics", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["version"] == nil || body["db_path"] == nil || body["probe_mode"] == nil {
+		t.Fatalf("missing expected keys: %+v", body)
+	}
+}
+
+func TestAboutPageServesHTML(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/about", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("/api/diagnostics")) {
+		t.Fatal("about page should reference diagnostics API")
 	}
 }
 

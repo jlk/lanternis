@@ -232,3 +232,72 @@ func (s *Store) CompleteFirstRun(ctx context.Context, cidr string) error {
 	}
 	return tx.Commit()
 }
+
+// AuditEvent is a row from audit_events (read-only diagnostics).
+type AuditEvent struct {
+	ID          int64     `json:"id"`
+	TS          time.Time `json:"ts"`
+	EventType   string    `json:"event_type"`
+	PayloadJSON string    `json:"payload_json"`
+}
+
+// LastScanRun returns the most recent scan_runs row, or nil if none.
+func (s *Store) LastScanRun(ctx context.Context) (*ScanRun, error) {
+	var sr ScanRun
+	var startedStr string
+	var ended sql.NullString
+	var cancel int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, started_at, ended_at, mode, cancel_requested FROM scan_runs ORDER BY id DESC LIMIT 1`,
+	).Scan(&sr.ID, &startedStr, &ended, &sr.Mode, &cancel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	sr.StartedAt, err = time.Parse(time.RFC3339Nano, startedStr)
+	if err != nil {
+		sr.StartedAt, _ = time.Parse(time.RFC3339, startedStr)
+	}
+	if ended.Valid && ended.String != "" {
+		t, e := time.Parse(time.RFC3339Nano, ended.String)
+		if e != nil {
+			t, _ = time.Parse(time.RFC3339, ended.String)
+		}
+		sr.EndedAt = t
+	}
+	sr.CancelRequested = cancel != 0
+	return &sr, nil
+}
+
+// ListRecentAuditEvents returns the newest audit rows (newest first), capped at 100.
+func (s *Store) ListRecentAuditEvents(ctx context.Context, limit int) ([]AuditEvent, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, ts, event_type, payload_json FROM audit_events ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]AuditEvent, 0)
+	for rows.Next() {
+		var ev AuditEvent
+		var tsStr string
+		if err := rows.Scan(&ev.ID, &tsStr, &ev.EventType, &ev.PayloadJSON); err != nil {
+			return nil, err
+		}
+		ts, e := time.Parse(time.RFC3339Nano, tsStr)
+		if e != nil {
+			ts, _ = time.Parse(time.RFC3339, tsStr)
+		}
+		ev.TS = ts
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}

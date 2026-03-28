@@ -23,14 +23,28 @@ type Server struct {
 	store   *store.Store
 	scanner *discovery.Scanner
 	mux     *http.ServeMux
+	dbPath  string
+	version string
 }
 
-func New(logger *log.Logger, st *store.Store, scanner *discovery.Scanner) *Server {
+// Config is optional metadata for diagnostics and the UI.
+type Config struct {
+	DBPath  string
+	Version string
+}
+
+func New(logger *log.Logger, st *store.Store, scanner *discovery.Scanner, cfg Config) *Server {
+	v := cfg.Version
+	if v == "" {
+		v = "dev"
+	}
 	s := &Server{
 		logger:  logger,
 		store:   st,
 		scanner: scanner,
 		mux:     http.NewServeMux(),
+		dbPath:  cfg.DBPath,
+		version: v,
 	}
 	s.routes()
 	return s
@@ -42,7 +56,9 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleHome)
+	s.mux.HandleFunc("/about", s.handleAbout)
 	s.mux.HandleFunc("/api/csrf", s.handleCSRF)
+	s.mux.HandleFunc("/api/diagnostics", s.handleDiagnostics)
 	s.mux.HandleFunc("/api/hosts", s.handleHosts)
 	s.mux.HandleFunc("/api/runtime", s.handleRuntime)
 	s.mux.HandleFunc("/api/setup/status", s.handleSetupStatus)
@@ -137,7 +153,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       </table>
     </section>
 
-    <p class="muted">Only scans your configured network from this computer.</p>
+    <p class="muted">Only scans your configured network from this computer. <a href="/about">Diagnostics</a></p>
   </main>
   <script>
     let csrfToken = "";

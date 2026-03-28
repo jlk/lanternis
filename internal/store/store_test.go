@@ -35,6 +35,19 @@ func TestStoreUpsertAndListHosts(t *testing.T) {
 	}
 }
 
+func TestLastScanRunEmpty(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := mustTestStore(t, ctx)
+	defer cleanup()
+	run, err := st.LastScanRun(ctx)
+	if err != nil {
+		t.Fatalf("LastScanRun: %v", err)
+	}
+	if run != nil {
+		t.Fatalf("expected nil last scan on empty DB")
+	}
+}
+
 func TestFirstRunCompleteLegacyHosts(t *testing.T) {
 	ctx := context.Background()
 	st, cleanup := mustTestStore(t, ctx)
