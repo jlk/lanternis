@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+func TestHostHintsEmpty(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := mustTestStore(t, ctx)
+	defer cleanup()
+	h, err := st.HostHints(ctx, "10.0.0.99")
+	if err != nil {
+		t.Fatalf("HostHints: %v", err)
+	}
+	if len(h) != 0 {
+		t.Fatalf("expected empty map, got %v", h)
+	}
+}
+
 func TestMergeHostHints(t *testing.T) {
 	ctx := context.Background()
 	st, cleanup := mustTestStore(t, ctx)

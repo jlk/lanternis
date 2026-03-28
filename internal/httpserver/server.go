@@ -153,7 +153,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         <li><strong>normal</strong> — Default balance (32). Good starting point for most home /24 networks.</li>
         <li><strong>thorough</strong> — Most parallel probes (48). Finishes sooner; more CPU and traffic.</li>
         <li><strong>Reachability</strong> — What we could infer from the active probe (e.g. TCP connect or ICMP). <strong>Unknown</strong> often means “no reply to our probe,” not “offline for sure.” Hidden rows may still be interesting later (M1a fingerprints, etc.).</li>
-        <li><strong>Hints</strong> — Passive clues merged from this machine (e.g. ARP MAC addresses on Linux/macOS when you start a scan). They do not replace reachability from probes.</li>
+        <li><strong>Hints</strong> — Passive clues merged from this machine after you start a scan: ARP (Linux/macOS), local SSDP (UPnP discovery), and mDNS names heard on the LAN. They do not replace reachability from probes.</li>
       </ul>
     </details>
 
@@ -355,8 +355,21 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       try {
         const rh = h.raw_hints;
         if (!rh || typeof rh !== "object") return "";
+        const parts = [];
+        const mdns = rh.mdns;
+        if (mdns && Array.isArray(mdns.names) && mdns.names.length) {
+          const extra = mdns.names.length > 1 ? " (+" + (mdns.names.length - 1) + ")" : "";
+          parts.push("mDNS " + String(mdns.names[0]) + extra);
+        }
+        const ssdp = rh.ssdp;
+        if (ssdp && Array.isArray(ssdp.st_types) && ssdp.st_types.length) {
+          let st = String(ssdp.st_types[0]);
+          if (st.length > 48) st = st.slice(0, 45) + "…";
+          parts.push("SSDP " + st);
+        }
         const arp = rh.arp;
-        if (arp && arp.mac) return "ARP · " + String(arp.mac);
+        if (arp && arp.mac) parts.push("ARP " + String(arp.mac));
+        return parts.join(" · ");
       } catch (e) {}
       return "";
     }
@@ -683,13 +696,21 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func(cidr string) {
-		n, err := passive.ApplyARPHints(context.Background(), s.store, cidr)
-		if err != nil {
+		bg := context.Background()
+		if n, err := passive.ApplyARPHints(bg, s.store, cidr); err != nil {
 			s.logger.Printf("passive ARP hints: %v", err)
-			return
-		}
-		if n > 0 {
+		} else if n > 0 {
 			s.logger.Printf("passive ARP hints: merged %d entries for %s", n, cidr)
+		}
+		if n, err := passive.ApplySSDPHints(bg, s.store, cidr); err != nil {
+			s.logger.Printf("passive SSDP hints: %v", err)
+		} else if n > 0 {
+			s.logger.Printf("passive SSDP hints: merged %d hosts for %s", n, cidr)
+		}
+		if n, err := passive.ApplyMDNSHints(bg, s.store, cidr); err != nil {
+			s.logger.Printf("passive mDNS hints: %v", err)
+		} else if n > 0 {
+			s.logger.Printf("passive mDNS hints: merged %d hosts for %s", n, cidr)
 		}
 	}(req.CIDR)
 
