@@ -100,6 +100,11 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     .first-run-card p { line-height: 1.45; margin: 0 0 10px 0; }
     .setup-check { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0; font-size: 14px; }
     .setup-check input { margin-top: 3px; }
+    details.panel { padding: 10px 12px; }
+    details.panel summary { cursor: pointer; font-weight: 600; margin: -4px 0 8px 0; }
+    details.panel ul { margin: 0; padding-left: 1.25rem; color: var(--ln-muted); font-size: 14px; line-height: 1.5; }
+    .table-toolbar { justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    caption { caption-side: top; text-align: left; font-size: 13px; color: var(--ln-muted); padding: 0 0 8px 0; }
   </style>
 </head>
 <body>
@@ -126,20 +131,36 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       <div class="controls">
         <button id="startBtn" class="primary">Start scan</button>
         <button id="cancelBtn">Cancel</button>
-        <label>CIDR <input id="cidrInput" value="192.168.1.0/24" /></label>
+        <label title="IPv4 network in CIDR form (e.g. 192.168.1.0/24). Only this range is scanned.">CIDR <input id="cidrInput" value="192.168.1.0/24" autocomplete="off" spellcheck="false" /></label>
         <label>Mode
-          <select id="modeSelect">
-            <option value="light">light</option>
-            <option value="normal" selected>normal</option>
-            <option value="thorough">thorough</option>
+          <select id="modeSelect" title="Controls how many hosts are probed in parallel (politeness vs speed).">
+            <option value="light" title="12 parallel probes — gentlest on your LAN; slowest on large subnets.">light</option>
+            <option value="normal" title="32 parallel probes — balanced default." selected>normal</option>
+            <option value="thorough" title="48 parallel probes — fastest scan; more load on CPU and network.">thorough</option>
           </select>
         </label>
         <span id="statusText" class="status muted" aria-live="polite">Status: idle</span>
       </div>
+      <p id="modeHint" class="muted" style="margin: 10px 0 0 0; font-size: 14px; line-height: 1.45;"></p>
     </section>
 
+    <details class="panel">
+      <summary>Scan modes &amp; what “reachability” means</summary>
+      <ul>
+        <li><strong>light</strong> — Fewest parallel probes (12). Use on busy networks or when you want minimal impact.</li>
+        <li><strong>normal</strong> — Default balance (32). Good starting point for most home /24 networks.</li>
+        <li><strong>thorough</strong> — Most parallel probes (48). Finishes sooner; more CPU and traffic.</li>
+        <li><strong>Reachability</strong> — What we could infer from the active probe (e.g. TCP connect or ICMP). <strong>Unknown</strong> often means “no reply to our probe,” not “offline for sure.” Hidden rows may still be interesting later (M1a fingerprints, etc.).</li>
+      </ul>
+    </details>
+
     <section class="panel">
+      <div class="controls table-toolbar">
+        <label class="setup-check" style="margin:0;"><input type="checkbox" id="hideUnknownReach" checked /> Hide unknown reachability</label>
+        <span id="hostCount" class="muted" aria-live="polite"></span>
+      </div>
       <table>
+        <caption>Devices seen on your LAN for this database. Sort columns by clicking headers.</caption>
         <thead>
           <tr>
             <th data-col="ip" role="button" tabindex="0" title="Sort by IP">IP</th>
@@ -170,10 +191,23 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const setupCidrInput = document.getElementById("setupCidrInput");
     const setupAck = document.getElementById("setupAck");
     const setupContinueBtn = document.getElementById("setupContinueBtn");
+    const hideUnknownReach = document.getElementById("hideUnknownReach");
+    const hostCount = document.getElementById("hostCount");
+    const modeHint = document.getElementById("modeHint");
 
     let currentHosts = [];
     let sort = { col: "ip", dir: "asc" };
     let setupDone = false;
+
+    const modeHints = {
+      light: "Light: 12 parallel probes — gentlest on your LAN; slowest on large subnets.",
+      normal: "Normal: 32 parallel probes — balanced default for most /24 home networks.",
+      thorough: "Thorough: 48 parallel probes — faster finish; more CPU and network load."
+    };
+
+    function refreshModeHint() {
+      modeHint.textContent = modeHints[modeSelect.value] || "";
+    }
 
     function showError(msg) {
       errorBox.style.display = "block";
@@ -305,6 +339,10 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       return 0; // unknown/other
     }
 
+    function isUnknownReachability(h) {
+      return String(h.reachability || "unknown").toLowerCase() === "unknown";
+    }
+
     function sortedHosts() {
       const rows = (currentHosts || []).slice();
       rows.sort((a, b) => {
@@ -324,13 +362,36 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       return rows;
     }
 
-    function renderHosts() {
+    function visibleHostRows() {
       const rows = sortedHosts();
+      if (!hideUnknownReach.checked) {
+        return rows;
+      }
+      return rows.filter((h) => !isUnknownReachability(h));
+    }
+
+    function renderHosts() {
+      const total = (currentHosts || []).length;
+      const rows = visibleHostRows();
+      const hiddenUnknown = hideUnknownReach.checked
+        ? (currentHosts || []).filter(isUnknownReachability).length
+        : 0;
       hostsBody.innerHTML = "";
-      if (!rows.length) {
+      if (!total) {
+        hostCount.textContent = "";
         hostsBody.innerHTML = "<tr><td colspan='5' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
         return;
       }
+      if (!rows.length) {
+        if (hideUnknownReach.checked && hiddenUnknown > 0) {
+          hostsBody.innerHTML = "<tr><td colspan='5' class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
+        } else {
+          hostsBody.innerHTML = "<tr><td colspan='5' class='muted'>No rows to show.</td></tr>";
+        }
+        hostCount.textContent = "Showing 0 of " + total + (hiddenUnknown ? " (" + hiddenUnknown + " hidden)" : "");
+        return;
+      }
+      hostCount.textContent = "Showing " + rows.length + " of " + total + (hiddenUnknown ? " (" + hiddenUnknown + " unknown hidden)" : "");
       for (const h of rows) {
         const tr = document.createElement("tr");
         tr.innerHTML =
@@ -408,6 +469,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     startBtn.addEventListener("click", () => startScan().catch((e) => showError(e.message)));
     cancelBtn.addEventListener("click", () => cancelScan().catch((e) => showError(e.message)));
     setupContinueBtn.addEventListener("click", () => completeFirstRun().catch((e) => showError(e.message)));
+    hideUnknownReach.addEventListener("change", () => renderHosts());
+    modeSelect.addEventListener("change", refreshModeHint);
 
     for (const th of tableHeaders) {
       th.addEventListener("click", () => setSort(th.getAttribute("data-col")));
@@ -432,6 +495,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       try {
         await initCSRF();
         await loadSetupStatus();
+        refreshModeHint();
         await loadRuntime();
         updateHeaderIndicators();
         await tick();
