@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -80,6 +81,10 @@ func (s *Store) migrate(ctx context.Context) error {
 			payload_json TEXT NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_ts ON audit_events(ts);`,
+		`CREATE TABLE IF NOT EXISTS app_kv (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -167,4 +172,63 @@ func (s *Store) InsertAuditEvent(ctx context.Context, eventType string, payloadJ
 		payloadJSON,
 	)
 	return err
+}
+
+const defaultSetupCIDR = "192.168.1.0/24"
+
+// FirstRunComplete returns true after the user has acknowledged the first-run trust screen,
+// or if the database already contains evidence of prior use (legacy installs).
+func (s *Store) FirstRunComplete(ctx context.Context) (bool, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM app_kv WHERE key = ?`, "first_run_completed_at").Scan(&v)
+	if err == nil && v != "" {
+		return true, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	var n int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scan_runs`).Scan(&n); err != nil {
+		return false, err
+	}
+	if n > 0 {
+		return true, nil
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM hosts`).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// SuggestedCIDR returns the saved default CIDR for the UI, or a safe placeholder.
+func (s *Store) SuggestedCIDR(ctx context.Context) (string, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM app_kv WHERE key = ?`, "default_cidr").Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return defaultSetupCIDR, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if v == "" {
+		return defaultSetupCIDR, nil
+	}
+	return v, nil
+}
+
+// CompleteFirstRun records acknowledgment and the chosen home-network CIDR.
+func (s *Store) CompleteFirstRun(ctx context.Context, cidr string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO app_kv (key, value) VALUES (?, ?)`, "first_run_completed_at", now); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO app_kv (key, value) VALUES (?, ?)`, "default_cidr", cidr); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -44,6 +45,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/csrf", s.handleCSRF)
 	s.mux.HandleFunc("/api/hosts", s.handleHosts)
 	s.mux.HandleFunc("/api/runtime", s.handleRuntime)
+	s.mux.HandleFunc("/api/setup/status", s.handleSetupStatus)
+	s.mux.HandleFunc("/api/setup/complete", s.requireCSRF(s.handleSetupComplete))
 	s.mux.HandleFunc("/api/scan/status", s.handleScanStatus)
 	s.mux.HandleFunc("/api/scan/start", s.requireCSRF(s.handleScanStart))
 	s.mux.HandleFunc("/api/scan/cancel", s.requireCSRF(s.handleScanCancel))
@@ -75,6 +78,12 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     .status { display: inline-block; min-width: 280px; }
     #errorBox { display: none; background: var(--ln-warn-bg); border: 1px solid #ffe69c; padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
     #probeBox { display: none; background: var(--ln-warn-bg); border: 1px solid #ffe69c; padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
+    .first-run-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+    .first-run-overlay.open { display: flex; }
+    .first-run-card { max-width: 520px; width: 100%; }
+    .first-run-card p { line-height: 1.45; margin: 0 0 10px 0; }
+    .setup-check { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0; font-size: 14px; }
+    .setup-check input { margin-top: 3px; }
   </style>
 </head>
 <body>
@@ -83,6 +92,19 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     <p class="muted">Local network scanner (M1). Unknown means unknown; we do not invent confidence.</p>
     <div id="errorBox" role="status" aria-live="polite"></div>
     <div id="probeBox" class="muted" role="status" aria-live="polite"></div>
+
+    <div id="firstRunOverlay" class="first-run-overlay" role="dialog" aria-modal="true" aria-labelledby="firstRunTitle">
+      <div class="first-run-card panel">
+        <h2 id="firstRunTitle">Before your first scan</h2>
+        <p class="muted">Lanternis runs only on this computer. Inventory and audit events are stored in a local SQLite database file (see the <code>-db</code> flag). Nothing is sent to the cloud by default.</p>
+        <p class="muted">Only scan networks you own or are explicitly authorized to test. Unauthorized scanning may violate law or policy.</p>
+        <label>Network range (CIDR) <input id="setupCidrInput" type="text" autocomplete="off" /></label>
+        <label class="setup-check"><input type="checkbox" id="setupAck" /> I confirm I only scan networks I own or am authorized to test.</label>
+        <div class="controls" style="margin-top: 8px;">
+          <button type="button" id="setupContinueBtn" class="primary">Continue</button>
+        </div>
+      </div>
+    </div>
 
     <section class="panel">
       <div class="controls">
@@ -128,9 +150,14 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const modeSelect = document.getElementById("modeSelect");
     const tableHeaders = Array.from(document.querySelectorAll("thead th[data-col]"));
     const probeBox = document.getElementById("probeBox");
+    const firstRunOverlay = document.getElementById("firstRunOverlay");
+    const setupCidrInput = document.getElementById("setupCidrInput");
+    const setupAck = document.getElementById("setupAck");
+    const setupContinueBtn = document.getElementById("setupContinueBtn");
 
     let currentHosts = [];
     let sort = { col: "ip", dir: "asc" };
+    let setupDone = false;
 
     function showError(msg) {
       errorBox.style.display = "block";
@@ -176,6 +203,41 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         probeBox.style.display = "block";
         probeBox.textContent = "Probe mode: unknown.";
       }
+    }
+
+    async function loadSetupStatus() {
+      const data = await fetchJSON("/api/setup/status");
+      setupDone = !data.needs_ack;
+      const suggested = data.suggested_cidr || "192.168.1.0/24";
+      setupCidrInput.value = suggested;
+      cidrInput.value = suggested;
+      if (data.needs_ack) {
+        firstRunOverlay.classList.add("open");
+        setupAck.checked = false;
+        startBtn.disabled = true;
+        cancelBtn.disabled = true;
+      } else {
+        firstRunOverlay.classList.remove("open");
+      }
+    }
+
+    async function completeFirstRun() {
+      clearError();
+      if (!setupAck.checked) {
+        showError("Please confirm you are authorized to scan this network.");
+        return;
+      }
+      const cidr = setupCidrInput.value.trim();
+      await fetchJSON("/api/setup/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({ cidr: cidr, acknowledged: true })
+      });
+      firstRunOverlay.classList.remove("open");
+      setupDone = true;
+      cidrInput.value = cidr;
+      startBtn.disabled = false;
+      cancelBtn.disabled = true;
     }
 
     async function loadHosts() {
@@ -291,12 +353,21 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     async function loadStatus() {
       const st = await fetchJSON("/api/scan/status");
       statusText.textContent = "Status: " + (st.scan_phase || "idle") + " | " + (st.completed || 0) + "/" + (st.total || 0);
+      if (!setupDone) {
+        startBtn.disabled = true;
+        cancelBtn.disabled = true;
+        return;
+      }
       startBtn.disabled = !!st.running;
       cancelBtn.disabled = !st.running;
     }
 
     async function startScan() {
       clearError();
+      if (!setupDone) {
+        showError("Complete the first-run setup before scanning.");
+        return;
+      }
       await fetchJSON("/api/scan/start", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
@@ -320,6 +391,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
 
     startBtn.addEventListener("click", () => startScan().catch((e) => showError(e.message)));
     cancelBtn.addEventListener("click", () => cancelScan().catch((e) => showError(e.message)));
+    setupContinueBtn.addEventListener("click", () => completeFirstRun().catch((e) => showError(e.message)));
 
     for (const th of tableHeaders) {
       th.addEventListener("click", () => setSort(th.getAttribute("data-col")));
@@ -343,6 +415,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     (async function boot() {
       try {
         await initCSRF();
+        await loadSetupStatus();
         await loadRuntime();
         updateHeaderIndicators();
         await tick();
@@ -392,6 +465,61 @@ func (s *Server) handleRuntime(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	done, err := s.store.FirstRunComplete(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	suggested, err := s.store.SuggestedCIDR(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"needs_ack":      !done,
+		"suggested_cidr": suggested,
+	})
+}
+
+type setupCompleteReq struct {
+	CIDR         string `json:"cidr"`
+	Acknowledged bool   `json:"acknowledged"`
+}
+
+func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+	var req setupCompleteReq
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if !req.Acknowledged {
+		writeErr(w, http.StatusBadRequest, errors.New("acknowledgment required"))
+		return
+	}
+	if req.CIDR == "" {
+		req.CIDR = "192.168.1.0/24"
+	}
+	if _, _, err := net.ParseCIDR(req.CIDR); err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("invalid CIDR"))
+		return
+	}
+	if err := s.store.CompleteFirstRun(r.Context(), req.CIDR); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	_ = audit.Append(r.Context(), s.store, "first_run_completed", map[string]any{
+		"cidr": req.CIDR,
+	})
+	s.logger.Printf("first-run setup completed cidr=%s", req.CIDR)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cidr": req.CIDR})
+}
+
 func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
@@ -424,9 +552,19 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		req.Concurrency = 32
 	}
 
+	done, err := s.store.FirstRunComplete(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !done {
+		writeErr(w, http.StatusForbidden, errors.New("complete first-run setup before scanning"))
+		return
+	}
+
 	// Important: do not bind the scan lifetime to the HTTP request context.
 	// Request contexts are cancelled when the handler returns, which would immediately cancel the scan.
-	_, err := s.scanner.Start(context.Background(), req.CIDR, req.Concurrency, func(result discovery.Result) error {
+	_, err = s.scanner.Start(context.Background(), req.CIDR, req.Concurrency, func(result discovery.Result) error {
 		return s.store.UpsertHost(context.Background(), store.Host{
 			IP:           result.IP,
 			Reachability: result.Reachability,

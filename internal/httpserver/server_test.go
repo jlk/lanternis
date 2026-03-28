@@ -29,6 +29,25 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 		_ = st.Close()
 		_ = os.Remove(dbPath)
 	})
+	if err := st.CompleteFirstRun(context.Background(), "10.0.0.0/30"); err != nil {
+		t.Fatalf("complete first run: %v", err)
+	}
+	logger := log.New(io.Discard, "", 0)
+	return New(logger, st, discovery.NewScanner()), st
+}
+
+func newTestServerWithoutFirstRun(t *testing.T) (*Server, *store.Store) {
+	t.Helper()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	st, err := store.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = st.Close()
+		_ = os.Remove(dbPath)
+	})
 	logger := log.New(io.Discard, "", 0)
 	return New(logger, st, discovery.NewScanner()), st
 }
@@ -208,6 +227,62 @@ func TestRuntimeEndpointReturnsProbeMode(t *testing.T) {
 	}
 	if body["probe_mode"] == "" {
 		t.Fatalf("expected probe_mode in runtime response")
+	}
+}
+
+func TestSetupStatusNeedsAckOnFreshDB(t *testing.T) {
+	srv, _ := newTestServerWithoutFirstRun(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/setup/status", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if needs, ok := out["needs_ack"].(bool); !ok || !needs {
+		t.Fatalf("expected needs_ack true, got %+v", out)
+	}
+}
+
+func TestScanStartForbiddenBeforeFirstRun(t *testing.T) {
+	srv, _ := newTestServerWithoutFirstRun(t)
+	token, cookie := csrfTokenAndCookie(t, srv)
+	req := httptest.NewRequest(http.MethodPost, "/api/scan/start", bytes.NewBufferString(`{"cidr":"10.0.0.0/30","mode":"normal","concurrency":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", token)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetupCompleteThenScanAccepted(t *testing.T) {
+	srv, _ := newTestServerWithoutFirstRun(t)
+	token, cookie := csrfTokenAndCookie(t, srv)
+
+	complete := httptest.NewRequest(http.MethodPost, "/api/setup/complete", bytes.NewBufferString(`{"cidr":"10.0.0.0/30","acknowledged":true}`))
+	complete.Header.Set("Content-Type", "application/json")
+	complete.Header.Set("X-CSRF-Token", token)
+	complete.AddCookie(cookie)
+	compRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(compRec, complete)
+	if compRec.Code != http.StatusOK {
+		t.Fatalf("setup complete expected 200, got %d body=%s", compRec.Code, compRec.Body.String())
+	}
+
+	start := httptest.NewRequest(http.MethodPost, "/api/scan/start", bytes.NewBufferString(`{"cidr":"10.0.0.0/30","mode":"normal","concurrency":1}`))
+	start.Header.Set("Content-Type", "application/json")
+	start.Header.Set("X-CSRF-Token", token)
+	start.AddCookie(cookie)
+	startRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(startRec, start)
+	if startRec.Code != http.StatusAccepted {
+		t.Fatalf("scan start expected 202, got %d body=%s", startRec.Code, startRec.Body.String())
 	}
 }
 

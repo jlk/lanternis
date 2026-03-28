@@ -35,6 +35,33 @@ func TestStoreUpsertAndListHosts(t *testing.T) {
 	}
 }
 
+func TestFirstRunCompleteLegacyHosts(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := mustTestStore(t, ctx)
+	defer cleanup()
+
+	done, err := st.FirstRunComplete(ctx)
+	if err != nil {
+		t.Fatalf("FirstRunComplete: %v", err)
+	}
+	if done {
+		t.Fatal("expected first run incomplete on empty DB")
+	}
+	now := time.Now().UTC()
+	if err := st.UpsertHost(ctx, Host{
+		IP: "10.0.0.1", Reachability: "unknown", Label: "", Confidence: "unknown", LastSeen: now,
+	}); err != nil {
+		t.Fatalf("UpsertHost: %v", err)
+	}
+	done, err = st.FirstRunComplete(ctx)
+	if err != nil {
+		t.Fatalf("FirstRunComplete: %v", err)
+	}
+	if !done {
+		t.Fatal("expected legacy DB with hosts to count as setup-complete")
+	}
+}
+
 func TestStoreScanRunAndCancelFlag(t *testing.T) {
 	ctx := context.Background()
 	st, cleanup := mustTestStore(t, ctx)
