@@ -5,7 +5,7 @@ Deferred from **CEO selective-expansion** review (**2026-03-22**). See `~/.gstac
 ## P2 — Soon after M1
 
 - **ICMP / raw-socket spike** — Document macOS/Linux/Windows permission model; link from `docs/ENGINEERING-PLAN.md` checklist.
-- **CI: `go test ./...`** — When `git` + remote exist; no network in default job.
+- **CI follow-up** — Extend GitHub Actions beyond baseline `go test ./...` (e.g., linting, race detector, and optional integration-tag job).
 - **First-run trust wizard** — Confirm CIDR, plain-language retention, optional NVD API key, “only scan networks you own” acknowledgment before first sweep.
 - **Redacted support export** — One-click bundle for GitHub issues: versions, capability flags, inventory summary, error codes; **no** secrets; optional opt-in for extra diagnostics.
 

@@ -43,6 +43,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.handleHome)
 	s.mux.HandleFunc("/api/csrf", s.handleCSRF)
 	s.mux.HandleFunc("/api/hosts", s.handleHosts)
+	s.mux.HandleFunc("/api/runtime", s.handleRuntime)
 	s.mux.HandleFunc("/api/scan/status", s.handleScanStatus)
 	s.mux.HandleFunc("/api/scan/start", s.requireCSRF(s.handleScanStart))
 	s.mux.HandleFunc("/api/scan/cancel", s.requireCSRF(s.handleScanCancel))
@@ -73,6 +74,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     .muted { color: var(--ln-muted); }
     .status { display: inline-block; min-width: 280px; }
     #errorBox { display: none; background: var(--ln-warn-bg); border: 1px solid #ffe69c; padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
+    #probeBox { display: none; background: var(--ln-warn-bg); border: 1px solid #ffe69c; padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
   </style>
 </head>
 <body>
@@ -80,6 +82,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     <h1>Lanternis</h1>
     <p class="muted">Local network scanner (M1). Unknown means unknown; we do not invent confidence.</p>
     <div id="errorBox" role="status" aria-live="polite"></div>
+    <div id="probeBox" class="muted" role="status" aria-live="polite"></div>
 
     <section class="panel">
       <div class="controls">
@@ -124,6 +127,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const cidrInput = document.getElementById("cidrInput");
     const modeSelect = document.getElementById("modeSelect");
     const tableHeaders = Array.from(document.querySelectorAll("thead th[data-col]"));
+    const probeBox = document.getElementById("probeBox");
 
     let currentHosts = [];
     let sort = { col: "ip", dir: "asc" };
@@ -156,6 +160,22 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     async function initCSRF() {
       const data = await fetchJSON("/api/csrf");
       csrfToken = data.csrf_token || "";
+    }
+
+    async function loadRuntime() {
+      const data = await fetchJSON("/api/runtime");
+      const mode = data.probe_mode || "unknown";
+      const guidance = data.probe_guidance || "";
+      if (mode === "tcp_fallback") {
+        probeBox.style.display = "block";
+        probeBox.textContent = "Probe mode: TCP fallback. " + guidance;
+      } else if (mode === "icmp_echo") {
+        probeBox.style.display = "block";
+        probeBox.textContent = "Probe mode: ICMP echo. " + guidance;
+      } else {
+        probeBox.style.display = "block";
+        probeBox.textContent = "Probe mode: unknown.";
+      }
     }
 
     async function loadHosts() {
@@ -323,6 +343,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     (async function boot() {
       try {
         await initCSRF();
+        await loadRuntime();
         updateHeaderIndicators();
         await tick();
         setInterval(tick, 1500);
@@ -358,6 +379,17 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"hosts": hosts})
+}
+
+func (s *Server) handleRuntime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"probe_mode":     discovery.ProbeMode(),
+		"probe_guidance": discovery.ProbeGuidance(),
+	})
 }
 
 func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {

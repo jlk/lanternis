@@ -194,6 +194,23 @@ func TestWrongHTTPMethodReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestRuntimeEndpointReturnsProbeMode(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/runtime", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode runtime response: %v", err)
+	}
+	if body["probe_mode"] == "" {
+		t.Fatalf("expected probe_mode in runtime response")
+	}
+}
+
 func csrfTokenAndCookie(t *testing.T, srv *Server) (string, *http.Cookie) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/csrf", nil)
