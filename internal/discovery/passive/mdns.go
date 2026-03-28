@@ -17,12 +17,18 @@ type MDNSEntry struct {
 }
 
 // CollectMDNS listens for mDNS traffic on 224.0.0.251:5353 for up to ~3.5s (bounded even if parent ctx is long).
-func CollectMDNS(ctx context.Context) ([]MDNSEntry, error) {
+// cidr selects the local interface (IPv4 in that net) for multicast; if none matches, uses the OS default.
+func CollectMDNS(ctx context.Context, cidr string) ([]MDNSEntry, error) {
 	sub, cancel := context.WithTimeout(ctx, 3500*time.Millisecond)
 	defer cancel()
 	deadline, _ := sub.Deadline()
 
-	conn, err := net.ListenMulticastUDP("udp4", nil, &net.UDPAddr{IP: net.ParseIP("224.0.0.251"), Port: 5353})
+	ifi, err := interfaceForCIDR(cidr)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := net.ListenMulticastUDP("udp4", ifi, &net.UDPAddr{IP: net.ParseIP("224.0.0.251"), Port: 5353})
 	if err != nil {
 		return nil, err
 	}

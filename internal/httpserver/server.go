@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jlk/lanternis/internal/audit"
@@ -26,12 +27,14 @@ type Server struct {
 	mux     *http.ServeMux
 	dbPath  string
 	version string
+	debug   bool
 }
 
 // Config is optional metadata for diagnostics and the UI.
 type Config struct {
 	DBPath  string
 	Version string
+	Debug   bool
 }
 
 func New(logger *log.Logger, st *store.Store, scanner *discovery.Scanner, cfg Config) *Server {
@@ -46,9 +49,22 @@ func New(logger *log.Logger, st *store.Store, scanner *discovery.Scanner, cfg Co
 		mux:     http.NewServeMux(),
 		dbPath:  cfg.DBPath,
 		version: v,
+		debug:   cfg.Debug,
 	}
 	s.routes()
+	if cfg.Debug {
+		s.scanner.SetDebugLog(func(format string, args ...any) {
+			s.debugf(format, args...)
+		})
+	}
 	return s
+}
+
+func (s *Server) debugf(format string, args ...any) {
+	if !s.debug {
+		return
+	}
+	s.logger.Printf("[debug] "+format, args...)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -677,7 +693,7 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 
 	// Important: do not bind the scan lifetime to the HTTP request context.
 	// Request contexts are cancelled when the handler returns, which would immediately cancel the scan.
-	_, err = s.scanner.Start(context.Background(), req.CIDR, req.Concurrency, func(result discovery.Result) error {
+	scanRunID, err := s.scanner.Start(context.Background(), req.CIDR, req.Concurrency, func(result discovery.Result) error {
 		return s.store.UpsertHost(context.Background(), store.Host{
 			IP:           result.IP,
 			Reachability: result.Reachability,
@@ -695,30 +711,18 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func(cidr string) {
-		bg := context.Background()
-		if n, err := passive.ApplyARPHints(bg, s.store, cidr); err != nil {
-			s.logger.Printf("passive ARP hints: %v", err)
-		} else if n > 0 {
-			s.logger.Printf("passive ARP hints: merged %d entries for %s", n, cidr)
-		}
-		if n, err := passive.ApplySSDPHints(bg, s.store, cidr); err != nil {
-			s.logger.Printf("passive SSDP hints: %v", err)
-		} else if n > 0 {
-			s.logger.Printf("passive SSDP hints: merged %d hosts for %s", n, cidr)
-		}
-		if n, err := passive.ApplyMDNSHints(bg, s.store, cidr); err != nil {
-			s.logger.Printf("passive mDNS hints: %v", err)
-		} else if n > 0 {
-			s.logger.Printf("passive mDNS hints: merged %d hosts for %s", n, cidr)
-		}
-	}(req.CIDR)
+	scanStartedAt := time.Now()
+	s.debugf("scan active probe start scanner_run_id=%d cidr=%s mode=%s concurrency=%d probe_mode=%s",
+		scanRunID, req.CIDR, req.Mode, req.Concurrency, discovery.ProbeMode())
+	passiveDone := make(chan passiveOutcome, 1)
+	go s.runPassiveDiscovery(req.CIDR, passiveDone)
 
 	dbRunID, err := s.store.InsertScanRun(r.Context(), req.Mode)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.debugf("scan db_run scan_id=%d scanner_run_id=%d cidr=%s", dbRunID, scanRunID, req.CIDR)
 	s.logger.Printf("scan started scan_id=%d cidr=%s mode=%s concurrency=%d", dbRunID, req.CIDR, req.Mode, req.Concurrency)
 	_ = audit.Append(r.Context(), s.store, "scan_started", map[string]any{
 		"scan_id": dbRunID,
@@ -726,7 +730,7 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		"mode":    req.Mode,
 	})
 
-	go s.watchAndFinalize(dbRunID)
+	go s.watchAndFinalize(dbRunID, scanStartedAt, req.CIDR, passiveDone)
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		// scan_id is the SQLite scan_runs primary key; the scanner's internal runID is not stable across runs.
 		"scan_id": dbRunID,
@@ -734,10 +738,118 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) watchAndFinalize(dbRunID int64) {
+// passiveOutcome is merge counts from one passive discovery pass (ARP / SSDP / mDNS).
+type passiveOutcome struct {
+	ARP   int
+	SSDP  int
+	MDNS  int
+}
+
+func (s *Server) runPassiveDiscovery(cidr string, done chan<- passiveOutcome) {
+	bg := context.Background()
+	s.debugf("passive discovery start cidr=%s", cidr)
+	if s.debug {
+		b, err := passive.LANBindingForCIDR(cidr)
+		if err != nil {
+			s.debugf("passive LAN binding: %v", err)
+		} else if b.LocalIP != "" {
+			s.debugf("passive LAN binding: interface=%s local_ip=%s (SSDP + mDNS multicast)", b.InterfaceName, b.LocalIP)
+		} else {
+			s.debugf("passive LAN binding: no local IPv4 in %s — using OS default (SSDP/mDNS may see nothing)", cidr)
+		}
+	}
+	arpN, _, err := s.runPassiveStep("ARP", cidr, func() (int, passive.ApplyDetail, error) {
+		return passive.ApplyARPHints(bg, s.store, cidr)
+	}, true)
+	if err != nil {
+		arpN = 0
+	}
+	var ssdpN, mdnsN int
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		n, _, err := s.runPassiveStep("SSDP", cidr, func() (int, passive.ApplyDetail, error) {
+			return passive.ApplySSDPHints(bg, s.store, cidr)
+		}, false)
+		if err == nil {
+			ssdpN = n
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		n, _, err := s.runPassiveStep("mDNS", cidr, func() (int, passive.ApplyDetail, error) {
+			return passive.ApplyMDNSHints(bg, s.store, cidr)
+		}, false)
+		if err == nil {
+			mdnsN = n
+		}
+	}()
+	wg.Wait()
+	o := passiveOutcome{ARP: arpN, SSDP: ssdpN, MDNS: mdnsN}
+	select {
+	case done <- o:
+	default:
+	}
+}
+
+func (s *Server) runPassiveStep(name, cidr string, fn func() (int, passive.ApplyDetail, error), useEntryWording bool) (int, passive.ApplyDetail, error) {
+	t0 := time.Now()
+	merged, detail, err := fn()
+	elapsed := time.Since(t0).Round(time.Millisecond)
+	if s.debug {
+		s.debugf("passive %s: elapsed=%s collected=%d in_cidr=%d merged=%d err=%v",
+			name, elapsed, detail.Collected, detail.InCIDR, merged, err)
+	}
+	if err != nil {
+		s.logger.Printf("passive %s hints: %v", name, err)
+		return merged, detail, err
+	}
+	if merged > 0 {
+		if useEntryWording {
+			s.logger.Printf("passive %s hints: merged %d entries for %s", name, merged, cidr)
+		} else {
+			s.logger.Printf("passive %s hints: merged %d hosts for %s", name, merged, cidr)
+		}
+	}
+	return merged, detail, nil
+}
+
+func countReachabilityInCIDR(hosts []store.Host, cidr string) (reachable, unreachable, unknown int) {
+	for _, h := range hosts {
+		if !passive.IPInCIDR(h.IP, cidr) {
+			continue
+		}
+		switch strings.ToLower(h.Reachability) {
+		case "reachable":
+			reachable++
+		case "unreachable":
+			unreachable++
+		default:
+			unknown++
+		}
+	}
+	return
+}
+
+func (s *Server) watchAndFinalize(dbRunID int64, scanStartedAt time.Time, cidr string, passiveDone <-chan passiveOutcome) {
+	if s.debug {
+		s.debugf("watch scan_id=%d waiting for active probe to finish", dbRunID)
+	}
+	var lastProgressLog time.Time
 	for {
 		st := s.scanner.Status()
+		if s.debug && st.Running {
+			if lastProgressLog.IsZero() || time.Since(lastProgressLog) >= 2*time.Second {
+				lastProgressLog = time.Now()
+				s.debugf("scan scan_id=%d progress=%d/%d phase=%s", dbRunID, st.Completed, st.Total, st.ScanPhase)
+			}
+		}
 		if !st.Running {
+			if s.debug {
+				s.debugf("scan scan_id=%d wall=%s phase=%s completed=%d total=%d",
+					dbRunID, time.Since(scanStartedAt).Round(time.Millisecond), st.ScanPhase, st.Completed, st.Total)
+			}
 			cancelled := st.ScanPhase == "cancelled"
 			s.logger.Printf("scan finished scan_id=%d phase=%s completed=%d total=%d cancelled=%t", dbRunID, st.ScanPhase, st.Completed, st.Total, cancelled)
 			_ = s.store.MarkScanEnded(context.Background(), dbRunID, cancelled)
@@ -749,6 +861,21 @@ func (s *Server) watchAndFinalize(dbRunID int64) {
 				"cancelled":  cancelled,
 				"finishedAt": time.Now().UTC().Format(time.RFC3339Nano),
 			})
+
+			var po passiveOutcome
+			select {
+			case po = <-passiveDone:
+			case <-time.After(90 * time.Second):
+			}
+			ctx := context.Background()
+			hosts, err := s.store.ListHosts(ctx)
+			if err != nil {
+				s.logger.Printf("scan summary scan_id=%d: list hosts: %v", dbRunID, err)
+				return
+			}
+			reach, unreach, unk := countReachabilityInCIDR(hosts, cidr)
+			s.logger.Printf("scan summary scan_id=%d cidr=%s active_probed=%d reachable=%d unreachable=%d unknown=%d passive_arp_merged=%d passive_ssdp_merged=%d passive_mdns_merged=%d",
+				dbRunID, cidr, st.Total, reach, unreach, unk, po.ARP, po.SSDP, po.MDNS)
 			return
 		}
 		time.Sleep(200 * time.Millisecond)

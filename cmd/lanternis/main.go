@@ -22,10 +22,14 @@ func main() {
 	var (
 		addr   = flag.String("addr", "127.0.0.1:8080", "HTTP listen address (loopback only)")
 		dbPath = flag.String("db", "lanternis.db", "SQLite database path")
+		debug  = flag.Bool("debug", false, "verbose logs: per-IP probes, passive collected/in_cidr/merged, scan progress ([debug] prefix)")
 	)
 	flag.Parse()
 
 	logger := log.New(os.Stdout, "lanternis ", log.LstdFlags|log.Lmsgprefix)
+	if *debug {
+		logger.Printf("debug logging enabled (-debug); look for [debug] lines")
+	}
 	ctx := context.Background()
 
 	st, err := store.Open(ctx, *dbPath)
@@ -38,6 +42,7 @@ func main() {
 	srv := httpserver.New(logger, st, scanner, httpserver.Config{
 		DBPath:  *dbPath,
 		Version: version,
+		Debug:   *debug,
 	})
 
 	httpSrv := &http.Server{

@@ -338,3 +338,16 @@ func csrfTokenAndCookie(t *testing.T, srv *Server) (string, *http.Cookie) {
 	}
 	return token, cookies[0]
 }
+
+func TestCountReachabilityInCIDR(t *testing.T) {
+	hosts := []store.Host{
+		{IP: "192.168.1.1", Reachability: "reachable"},
+		{IP: "192.168.1.2", Reachability: "unknown"},
+		{IP: "192.168.1.3", Reachability: "unreachable"},
+		{IP: "10.0.0.1", Reachability: "reachable"},
+	}
+	r, u, k := countReachabilityInCIDR(hosts, "192.168.1.0/24")
+	if r != 1 || u != 1 || k != 1 {
+		t.Fatalf("got reachable=%d unreachable=%d unknown=%d", r, u, k)
+	}
+}

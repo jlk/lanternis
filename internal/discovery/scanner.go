@@ -29,6 +29,9 @@ type Scanner struct {
 	status    Status
 	cancelFn  context.CancelFunc
 	lastRunID int64
+
+	probeDebugMu sync.Mutex
+	probeDebug   func(string, ...any) // set via SetDebugLog; must not block
 }
 
 func NewScanner() *Scanner {
@@ -67,14 +70,32 @@ func (s *Scanner) Start(ctx context.Context, cidr string, concurrency int, onRes
 	}
 	s.mu.Unlock()
 
-	go s.scan(scanCtx, ips, concurrency, onResult)
+	go s.scan(scanCtx, ips, concurrency, onResult, runID)
 	return runID, nil
 }
 
-func (s *Scanner) scan(ctx context.Context, ips []string, concurrency int, onResult func(Result) error) {
+// SetDebugLog registers a logger for per-host probe lines when non-nil. Safe to call before Start.
+func (s *Scanner) SetDebugLog(f func(string, ...any)) {
+	s.probeDebugMu.Lock()
+	s.probeDebug = f
+	s.probeDebugMu.Unlock()
+}
+
+func (s *Scanner) probeLogf(format string, args ...any) {
+	s.probeDebugMu.Lock()
+	f := s.probeDebug
+	s.probeDebugMu.Unlock()
+	if f != nil {
+		f(format, args...)
+	}
+}
+
+func (s *Scanner) scan(ctx context.Context, ips []string, concurrency int, onResult func(Result) error, runID int64) {
 	if concurrency <= 0 {
 		concurrency = 32
 	}
+	s.probeLogf("scan run_id=%d hosts=%d concurrency=%d first_ip=%s last_ip=%s",
+		runID, len(ips), concurrency, firstIP(ips), lastIP(ips))
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 
@@ -92,6 +113,8 @@ func (s *Scanner) scan(ctx context.Context, ips []string, concurrency int, onRes
 			defer func() { <-sem }()
 
 			reachable := pingHost(ctx, ip)
+			s.probeLogf("probe run_id=%d ip=%s reachable=%t reachability=%s",
+				runID, ip, reachable, map[bool]string{true: "reachable", false: "unknown"}[reachable])
 			now := time.Now().UTC()
 			_ = onResult(Result{
 				IP:           ip,
@@ -108,6 +131,7 @@ func (s *Scanner) scan(ctx context.Context, ips []string, concurrency int, onRes
 	}
 
 	wg.Wait()
+	s.probeLogf("scan run_id=%d probe_loop_finished", runID)
 	select {
 	case <-ctx.Done():
 		s.finish("cancelled")
@@ -145,6 +169,20 @@ func (s *Scanner) finish(phase string) {
 	defer s.mu.Unlock()
 	s.status.Running = false
 	s.status.ScanPhase = phase
+}
+
+func firstIP(ips []string) string {
+	if len(ips) == 0 {
+		return ""
+	}
+	return ips[0]
+}
+
+func lastIP(ips []string) string {
+	if len(ips) == 0 {
+		return ""
+	}
+	return ips[len(ips)-1]
 }
 
 func hostsFromCIDR(cidr string) ([]string, error) {

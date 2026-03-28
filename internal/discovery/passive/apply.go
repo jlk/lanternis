@@ -6,18 +6,26 @@ import (
 	"github.com/jlk/lanternis/internal/store"
 )
 
+// ApplyDetail summarizes raw collection vs CIDR filtering (for debug logs).
+type ApplyDetail struct {
+	Collected int // rows from Collect* before CIDR filter
+	InCIDR    int // entries inside CIDR (merge attempts)
+}
+
 // ApplyARPHints merges ARP cache entries that fall inside cidr into hosts.raw_hints_json under key "arp".
 // Returns the number of IPs updated or inserted. Safe to run concurrently with active probing; scan UpsertHost does not clear raw_hints on update.
-func ApplyARPHints(ctx context.Context, st *store.Store, cidr string) (int, error) {
+func ApplyARPHints(ctx context.Context, st *store.Store, cidr string) (merged int, detail ApplyDetail, err error) {
 	entries, err := CollectARP(ctx)
+	detail.Collected = len(entries)
 	if err != nil {
-		return 0, err
+		return 0, detail, err
 	}
 	n := 0
 	for _, e := range entries {
 		if !IPInCIDR(e.IP, cidr) {
 			continue
 		}
+		detail.InCIDR++
 		patch := map[string]any{
 			"arp": map[string]any{
 				"mac":    e.MAC,
@@ -25,27 +33,29 @@ func ApplyARPHints(ctx context.Context, st *store.Store, cidr string) (int, erro
 			},
 		}
 		if err := st.MergeHostHints(ctx, e.IP, patch); err != nil {
-			return n, err
+			return n, detail, err
 		}
 		n++
 	}
-	return n, nil
+	return n, detail, nil
 }
 
 // ApplySSDPHints runs SSDP M-SEARCH and merges responses into raw_hints_json under "ssdp" for IPs in cidr.
-func ApplySSDPHints(ctx context.Context, st *store.Store, cidr string) (int, error) {
-	entries, err := CollectSSDP(ctx)
+func ApplySSDPHints(ctx context.Context, st *store.Store, cidr string) (merged int, detail ApplyDetail, err error) {
+	entries, err := CollectSSDP(ctx, cidr)
+	detail.Collected = len(entries)
 	if err != nil {
-		return 0, err
+		return 0, detail, err
 	}
 	n := 0
 	for _, e := range entries {
 		if !IPInCIDR(e.IP, cidr) {
 			continue
 		}
+		detail.InCIDR++
 		existing, err := st.HostHints(ctx, e.IP)
 		if err != nil {
-			return n, err
+			return n, detail, err
 		}
 		var ssdpObj map[string]any
 		if x, ok := existing["ssdp"].(map[string]any); ok {
@@ -68,27 +78,29 @@ func ApplySSDPHints(ctx context.Context, st *store.Store, cidr string) (int, err
 		}
 		patch := map[string]any{"ssdp": ssdpPatch}
 		if err := st.MergeHostHints(ctx, e.IP, patch); err != nil {
-			return n, err
+			return n, detail, err
 		}
 		n++
 	}
-	return n, nil
+	return n, detail, nil
 }
 
 // ApplyMDNSHints listens for mDNS traffic and merges hostnames into raw_hints_json under "mdns" for IPs in cidr.
-func ApplyMDNSHints(ctx context.Context, st *store.Store, cidr string) (int, error) {
-	entries, err := CollectMDNS(ctx)
+func ApplyMDNSHints(ctx context.Context, st *store.Store, cidr string) (merged int, detail ApplyDetail, err error) {
+	entries, err := CollectMDNS(ctx, cidr)
+	detail.Collected = len(entries)
 	if err != nil {
-		return 0, err
+		return 0, detail, err
 	}
 	n := 0
 	for _, e := range entries {
 		if !IPInCIDR(e.IP, cidr) {
 			continue
 		}
+		detail.InCIDR++
 		existing, err := st.HostHints(ctx, e.IP)
 		if err != nil {
-			return n, err
+			return n, detail, err
 		}
 		var mdnsObj map[string]any
 		if x, ok := existing["mdns"].(map[string]any); ok {
@@ -104,9 +116,9 @@ func ApplyMDNSHints(ctx context.Context, st *store.Store, cidr string) (int, err
 			},
 		}
 		if err := st.MergeHostHints(ctx, e.IP, patch); err != nil {
-			return n, err
+			return n, detail, err
 		}
 		n++
 	}
-	return n, nil
+	return n, detail, nil
 }
