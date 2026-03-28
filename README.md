@@ -2,7 +2,7 @@
 
 **Lanternis** is a hobby/OSS tool for the household “IT person”: **LAN discovery**, honest device inventory, and (later) **evidence-backed** security intel—without pretending to know what the network does not reveal.
 
-This repository is **early**: specs and plans are in place; the **M1** vertical slice (SQLite, discovery, localhost API, audit) is still to be implemented. See **`docs/ENGINEERING-PLAN.md`** for the execution plan.
+The **M1** vertical slice is in place: SQLite persistence, LAN discovery, a localhost-only HTTP API with CSRF on mutating routes, and audit logging. Scans record **per-run CIDR**, store **CIDR-scoped snapshots** for diffing, and the web UI shows **diff summary**, **new-open-ports** notices, and **export** of the latest diff as JSON. See **`docs/ENGINEERING-PLAN.md`** for package layout, security notes, and what comes next.
 
 ## Documentation
 
