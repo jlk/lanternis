@@ -179,7 +179,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         </label>
         <span id="statusText" class="status muted" aria-live="polite">Status: idle</span>
         <span id="probeBadge" class="muted" style="margin-left:8px;" aria-live="polite"></span>
-        <button type="button" id="themeToggle" title="Light or dark appearance">Appearance</button>
+        <button type="button" id="themeToggle" aria-pressed="false" title="Switch to dark mode">Dark mode</button>
         <button type="button" id="diffExportBtn" title="Download scan diff JSON">Export diff</button>
       </div>
       <p id="modeHint" class="muted" style="margin: 10px 0 0 0; font-size: 14px; line-height: 1.45;"></p>
@@ -556,6 +556,13 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       await loadStatus();
     }
 
+    function syncThemeToggleLabel() {
+      const dark = document.documentElement.getAttribute("data-theme") === "dark";
+      themeToggle.textContent = dark ? "Light mode" : "Dark mode";
+      themeToggle.title = dark ? "Switch to light mode" : "Switch to dark mode";
+      themeToggle.setAttribute("aria-pressed", dark ? "true" : "false");
+    }
+
     function initTheme() {
       const saved = localStorage.getItem(STORAGE_THEME);
       if (saved === "dark") {
@@ -565,6 +572,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
         document.documentElement.setAttribute("data-theme", "dark");
       }
+      syncThemeToggleLabel();
     }
 
     function renderDiffStrip(d) {
@@ -631,6 +639,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         document.documentElement.setAttribute("data-theme", "dark");
         localStorage.setItem(STORAGE_THEME, "dark");
       }
+      syncThemeToggleLabel();
     });
     portBannerDismiss.addEventListener("click", () => {
       fetchJSON("/api/scan/diff").then((d) => {
