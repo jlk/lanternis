@@ -15,7 +15,7 @@ Deferred from **CEO selective-expansion** review (**2026-03-22**). See `~/.gstac
 
 - **`DESIGN.md` or expanded tokens** — **Done (baseline):** root `DESIGN.md` + `docs/design-preview.html`; keep embedded CSS in sync with tokens when changing UI.
 - **Dark mode** — **Done (console):** light/dark toggle + `prefers-color-scheme` when no saved preference; keep tokens aligned with `DESIGN.md` on edits.
-- **Pluggable fingerprint providers** — Internal interface + disk-based packs after **3+** shipped heuristics prove the shape.
+- **Device fingerprinting** — **Plan:** [`docs/FINGERPRINT-PLAN.md`](docs/FINGERPRINT-PLAN.md). **Product target: L4** (manufacturer/model/firmware strings with evidence). Spine: UPnP `LOCATION` XML + HTTP(S)/TLS/SSH probes; OUI/mDNS/SSDP as ladder + merge; DHCP/p0f secondary; pluggable packs after **3+** heuristics.
 - **Scan diff / history** — **Partially done:** last **N** snapshot runs retained; **GET `/api/scan/runs`** + **Recent scans** panel (id, times, mode, CIDR, status). **Still open:** flapping hosts, label-change emphasis, full **timeline** UI (deferred below).
 - **New open-port alerts** — **Done (v1):** diff vs previous snapshot + localhost **banner**; dismiss per scan + **Snooze 24h**. Optional later: audit event on new ports.
 - **CIDR-scoped scan diff** — **Done.**
