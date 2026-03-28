@@ -2,6 +2,7 @@ package passive
 
 import (
 	"context"
+	"time"
 
 	"github.com/jlk/lanternis/internal/store"
 )
@@ -41,8 +42,9 @@ func ApplyARPHints(ctx context.Context, st *store.Store, cidr string) (merged in
 }
 
 // ApplySSDPHints runs SSDP M-SEARCH and merges responses into raw_hints_json under "ssdp" for IPs in cidr.
-func ApplySSDPHints(ctx context.Context, st *store.Store, cidr string) (merged int, detail ApplyDetail, err error) {
-	entries, err := CollectSSDP(ctx, cidr)
+// listenMax bounds the UDP read window; use 0 for the default (~3s).
+func ApplySSDPHints(ctx context.Context, st *store.Store, cidr string, listenMax time.Duration) (merged int, detail ApplyDetail, err error) {
+	entries, err := CollectSSDP(ctx, cidr, listenMax)
 	detail.Collected = len(entries)
 	if err != nil {
 		return 0, detail, err
@@ -86,8 +88,9 @@ func ApplySSDPHints(ctx context.Context, st *store.Store, cidr string) (merged i
 }
 
 // ApplyMDNSHints listens for mDNS traffic and merges hostnames into raw_hints_json under "mdns" for IPs in cidr.
-func ApplyMDNSHints(ctx context.Context, st *store.Store, cidr string) (merged int, detail ApplyDetail, err error) {
-	entries, err := CollectMDNS(ctx, cidr)
+// listenMax bounds the multicast listen window; use 0 for the default (~3.5s).
+func ApplyMDNSHints(ctx context.Context, st *store.Store, cidr string, listenMax time.Duration) (merged int, detail ApplyDetail, err error) {
+	entries, err := CollectMDNS(ctx, cidr, listenMax)
 	detail.Collected = len(entries)
 	if err != nil {
 		return 0, detail, err

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -121,6 +122,13 @@ func (s *Store) MarkScanEnded(ctx context.Context, id int64, cancelRequested boo
 }
 
 func (s *Store) UpsertHost(ctx context.Context, h Host) error {
+	reach := h.Reachability
+	if strings.EqualFold(reach, "unknown") {
+		hints, err := s.HostHints(ctx, h.IP)
+		if err == nil && HintsIndicatePassivePresence(hints) {
+			reach = "observed"
+		}
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO hosts (ip, last_seen, reachability, confidence, label)
 		VALUES (?, ?, ?, ?, ?)
@@ -132,7 +140,7 @@ func (s *Store) UpsertHost(ctx context.Context, h Host) error {
 	`,
 		h.IP,
 		h.LastSeen.UTC().Format(time.RFC3339Nano),
-		h.Reachability,
+		reach,
 		h.Confidence,
 		h.Label,
 	)

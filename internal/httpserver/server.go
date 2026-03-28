@@ -168,7 +168,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         <li><strong>light</strong> — Fewest parallel probes (12). Use on busy networks or when you want minimal impact.</li>
         <li><strong>normal</strong> — Default balance (32). Good starting point for most home /24 networks.</li>
         <li><strong>thorough</strong> — Most parallel probes (48). Finishes sooner; more CPU and traffic.</li>
-        <li><strong>Reachability</strong> — What we could infer from the active probe (e.g. TCP connect or ICMP). <strong>Unknown</strong> often means “no reply to our probe,” not “offline for sure.” Hidden rows may still be interesting later (M1a fingerprints, etc.).</li>
+        <li><strong>Reachability</strong> — What we could infer from the active probe (e.g. TCP connect or ICMP). <strong>Observed</strong> means we saw the host via passive discovery (ARP, mDNS, or SSDP) but the active probe did not get a reply. <strong>Unknown</strong> often means “no reply to our probe” and no passive hints yet — not “offline for sure.” Hidden rows may still be interesting later (M1a fingerprints, etc.).</li>
         <li><strong>Hints</strong> — Passive clues merged from this machine after you start a scan: ARP (Linux/macOS), local SSDP (UPnP discovery), and mDNS names heard on the LAN. They do not replace reachability from probes.</li>
       </ul>
     </details>
@@ -358,7 +358,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
 
     function rankReachability(v) {
       const s = String(v || "unknown").toLowerCase();
-      if (s === "reachable") return 2;
+      if (s === "reachable") return 3;
+      if (s === "observed") return 2;
       if (s === "unreachable") return 1;
       return 0; // unknown/other
     }
@@ -770,7 +771,7 @@ func (s *Server) runPassiveDiscovery(cidr string, done chan<- passiveOutcome) {
 	go func() {
 		defer wg.Done()
 		n, _, err := s.runPassiveStep("SSDP", cidr, func() (int, passive.ApplyDetail, error) {
-			return passive.ApplySSDPHints(bg, s.store, cidr)
+			return passive.ApplySSDPHints(bg, s.store, cidr, 0)
 		}, false)
 		if err == nil {
 			ssdpN = n
@@ -779,7 +780,7 @@ func (s *Server) runPassiveDiscovery(cidr string, done chan<- passiveOutcome) {
 	go func() {
 		defer wg.Done()
 		n, _, err := s.runPassiveStep("mDNS", cidr, func() (int, passive.ApplyDetail, error) {
-			return passive.ApplyMDNSHints(bg, s.store, cidr)
+			return passive.ApplyMDNSHints(bg, s.store, cidr, 0)
 		}, false)
 		if err == nil {
 			mdnsN = n
@@ -815,7 +816,7 @@ func (s *Server) runPassiveStep(name, cidr string, fn func() (int, passive.Apply
 	return merged, detail, nil
 }
 
-func countReachabilityInCIDR(hosts []store.Host, cidr string) (reachable, unreachable, unknown int) {
+func countReachabilityInCIDR(hosts []store.Host, cidr string) (reachable, unreachable, unknown, observed int) {
 	for _, h := range hosts {
 		if !passive.IPInCIDR(h.IP, cidr) {
 			continue
@@ -825,6 +826,8 @@ func countReachabilityInCIDR(hosts []store.Host, cidr string) (reachable, unreac
 			reachable++
 		case "unreachable":
 			unreachable++
+		case "observed":
+			observed++
 		default:
 			unknown++
 		}
@@ -873,9 +876,9 @@ func (s *Server) watchAndFinalize(dbRunID int64, scanStartedAt time.Time, cidr s
 				s.logger.Printf("scan summary scan_id=%d: list hosts: %v", dbRunID, err)
 				return
 			}
-			reach, unreach, unk := countReachabilityInCIDR(hosts, cidr)
-			s.logger.Printf("scan summary scan_id=%d cidr=%s active_probed=%d reachable=%d unreachable=%d unknown=%d passive_arp_merged=%d passive_ssdp_merged=%d passive_mdns_merged=%d",
-				dbRunID, cidr, st.Total, reach, unreach, unk, po.ARP, po.SSDP, po.MDNS)
+			reach, unreach, unk, obs := countReachabilityInCIDR(hosts, cidr)
+			s.logger.Printf("scan summary scan_id=%d cidr=%s active_probed=%d reachable=%d unreachable=%d unknown=%d observed=%d passive_arp_merged=%d passive_ssdp_merged=%d passive_mdns_merged=%d",
+				dbRunID, cidr, st.Total, reach, unreach, unk, obs, po.ARP, po.SSDP, po.MDNS)
 			return
 		}
 		time.Sleep(200 * time.Millisecond)

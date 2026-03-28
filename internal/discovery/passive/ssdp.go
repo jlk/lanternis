@@ -25,10 +25,15 @@ const msearchPayload = "M-SEARCH * HTTP/1.1\r\n" +
 	"ST: ssdp:all\r\n" +
 	"MX: 2\r\n\r\n"
 
-// CollectSSDP sends one M-SEARCH (ssdp:all) and reads UDP responses for up to ~3s (bounded even if parent ctx is long).
+const defaultSSDPListen = 3 * time.Second
+
+// CollectSSDP sends one M-SEARCH (ssdp:all) and reads UDP responses until listenMax (or default ~3s if listenMax <= 0).
 // cidr selects a local IPv4 on that subnet to bind the socket; if none matches, binds 0.0.0.0.
-func CollectSSDP(ctx context.Context, cidr string) ([]SSDPEntry, error) {
-	sub, cancel := context.WithTimeout(ctx, 3*time.Second)
+func CollectSSDP(ctx context.Context, cidr string, listenMax time.Duration) ([]SSDPEntry, error) {
+	if listenMax <= 0 {
+		listenMax = defaultSSDPListen
+	}
+	sub, cancel := context.WithTimeout(ctx, listenMax)
 	defer cancel()
 	deadline, _ := sub.Deadline()
 

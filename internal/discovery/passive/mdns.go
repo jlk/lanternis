@@ -10,16 +10,21 @@ import (
 	"github.com/miekg/dns"
 )
 
+const defaultMDNSListen = 3500 * time.Millisecond
+
 // MDNSEntry aggregates mDNS hostnames seen for one IPv4 address during a collect window.
 type MDNSEntry struct {
 	IP    string   `json:"ip"`
 	Names []string `json:"names,omitempty"`
 }
 
-// CollectMDNS listens for mDNS traffic on 224.0.0.251:5353 for up to ~3.5s (bounded even if parent ctx is long).
+// CollectMDNS listens for mDNS traffic on 224.0.0.251:5353 until listenMax (or default ~3.5s if listenMax <= 0).
 // cidr selects the local interface (IPv4 in that net) for multicast; if none matches, uses the OS default.
-func CollectMDNS(ctx context.Context, cidr string) ([]MDNSEntry, error) {
-	sub, cancel := context.WithTimeout(ctx, 3500*time.Millisecond)
+func CollectMDNS(ctx context.Context, cidr string, listenMax time.Duration) ([]MDNSEntry, error) {
+	if listenMax <= 0 {
+		listenMax = defaultMDNSListen
+	}
+	sub, cancel := context.WithTimeout(ctx, listenMax)
 	defer cancel()
 	deadline, _ := sub.Deadline()
 

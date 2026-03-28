@@ -344,10 +344,11 @@ func TestCountReachabilityInCIDR(t *testing.T) {
 		{IP: "192.168.1.1", Reachability: "reachable"},
 		{IP: "192.168.1.2", Reachability: "unknown"},
 		{IP: "192.168.1.3", Reachability: "unreachable"},
+		{IP: "192.168.1.4", Reachability: "observed"},
 		{IP: "10.0.0.1", Reachability: "reachable"},
 	}
-	r, u, k := countReachabilityInCIDR(hosts, "192.168.1.0/24")
-	if r != 1 || u != 1 || k != 1 {
-		t.Fatalf("got reachable=%d unreachable=%d unknown=%d", r, u, k)
+	r, u, k, o := countReachabilityInCIDR(hosts, "192.168.1.0/24")
+	if r != 1 || u != 1 || k != 1 || o != 1 {
+		t.Fatalf("got reachable=%d unreachable=%d unknown=%d observed=%d", r, u, k, o)
 	}
 }

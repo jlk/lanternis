@@ -7,6 +7,24 @@ import (
 	"time"
 )
 
+func TestHintsIndicatePassivePresence(t *testing.T) {
+	if !HintsIndicatePassivePresence(map[string]any{"arp": map[string]any{"mac": "aa:bb:cc:dd:ee:01"}}) {
+		t.Fatal("expected arp mac")
+	}
+	if HintsIndicatePassivePresence(map[string]any{"arp": map[string]any{"mac": ""}}) {
+		t.Fatal("empty mac should not count")
+	}
+	if !HintsIndicatePassivePresence(map[string]any{"mdns": map[string]any{"names": []any{"x.local"}}}) {
+		t.Fatal("expected mdns names")
+	}
+	if !HintsIndicatePassivePresence(map[string]any{"ssdp": map[string]any{"st_types": []any{"upnp:rootdevice"}}}) {
+		t.Fatal("expected ssdp st_types")
+	}
+	if HintsIndicatePassivePresence(map[string]any{}) {
+		t.Fatal("empty map")
+	}
+}
+
 func TestHostHintsEmpty(t *testing.T) {
 	ctx := context.Background()
 	st, cleanup := mustTestStore(t, ctx)
@@ -59,6 +77,9 @@ func TestMergeHostHints(t *testing.T) {
 	if arp["source"] != "linux_proc" {
 		t.Fatalf("expected nested merge to keep source, got %v", arp["source"])
 	}
+	if hosts[0].Reachability != "observed" {
+		t.Fatalf("expected reachability observed when hints include ARP, got %q", hosts[0].Reachability)
+	}
 
 	// UpsertHost must not wipe hints.
 	now := time.Now().UTC()
@@ -73,6 +94,33 @@ func TestMergeHostHints(t *testing.T) {
 	}
 	if len(hosts2) != 1 || len(hosts2[0].RawHints) == 0 {
 		t.Fatalf("expected raw_hints preserved after UpsertHost, got %+v", hosts2)
+	}
+}
+
+func TestUpsertHostUnknownBecomesObservedWhenPassiveHints(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := mustTestStore(t, ctx)
+	defer cleanup()
+
+	ip := "10.0.0.55"
+	patch := map[string]any{
+		"arp": map[string]any{"mac": "11:22:33:44:55:66", "source": "linux_proc"},
+	}
+	if err := st.MergeHostHints(ctx, ip, patch); err != nil {
+		t.Fatalf("MergeHostHints: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := st.UpsertHost(ctx, Host{
+		IP: ip, Reachability: "unknown", Label: "", Confidence: "low", LastSeen: now,
+	}); err != nil {
+		t.Fatalf("UpsertHost: %v", err)
+	}
+	hosts, err := st.ListHosts(ctx)
+	if err != nil {
+		t.Fatalf("ListHosts: %v", err)
+	}
+	if len(hosts) != 1 || hosts[0].Reachability != "observed" {
+		t.Fatalf("expected observed after unknown upsert with hints, got %+v", hosts)
 	}
 }
 
