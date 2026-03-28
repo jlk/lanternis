@@ -43,6 +43,7 @@ func (s *Server) buildDiagnostics(ctx context.Context) (map[string]any, error) {
 			"id":               last.ID,
 			"started_at":       last.StartedAt.UTC().Format(time.RFC3339Nano),
 			"mode":             last.Mode,
+			"cidr":             last.CIDR,
 			"cancel_requested": last.CancelRequested,
 		}
 		if !last.EndedAt.IsZero() {

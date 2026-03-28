@@ -84,6 +84,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/scan/start", s.requireCSRF(s.handleScanStart))
 	s.mux.HandleFunc("/api/scan/cancel", s.requireCSRF(s.handleScanCancel))
 	s.mux.HandleFunc("/api/support/export", s.requireCSRF(s.handleSupportExport))
+	s.mux.HandleFunc("/api/scan/diff", s.handleScanDiff)
+	s.mux.HandleFunc("/api/scan/diff/export", s.requireCSRF(s.handleScanDiffExport))
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
@@ -95,23 +97,34 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lanternis</title>
   <style>
-    :root { --ln-bg:#f8f9fa; --ln-surface:#fff; --ln-text:#1a1a1a; --ln-muted:#6c757d; --ln-border:#dee2e6; --ln-accent:#0d6efd; --ln-warn-bg:#fff3cd; }
-    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--ln-bg); color: var(--ln-text); }
+    :root {
+      --ln-bg:#f8f9fa; --ln-surface:#fff; --ln-text:#1a1a1a; --ln-muted:#6c757d; --ln-border:#dee2e6;
+      --ln-accent:#0d6efd; --ln-warn-bg:#fff3cd; --ln-warn-border:#ffe69c; --ln-on-accent:#fff;
+    }
+    html[data-theme="dark"] {
+      --ln-bg:#121416; --ln-surface:#1a1d21; --ln-text:#e8eaed; --ln-muted:#9aa0a6; --ln-border:#3c4043;
+      --ln-accent:#5c9eff; --ln-warn-bg:#3d3200; --ln-warn-border:#6b5a00; --ln-on-accent:#0d1117;
+    }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--ln-bg); color: var(--ln-text); transition: background 0.15s ease, color 0.15s ease; }
     main { max-width: 1080px; margin: 0 auto; padding: 16px; }
     h1 { margin-top: 0; }
     .panel { background: var(--ln-surface); border: 1px solid var(--ln-border); border-radius: 4px; padding: 12px; margin-bottom: 12px; }
     .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     label { font-size: 14px; color: var(--ln-muted); }
-    input, select, button { font: inherit; padding: 8px 10px; border-radius: 4px; border: 1px solid var(--ln-border); background: #fff; }
-    button.primary { background: var(--ln-accent); color: #fff; border-color: var(--ln-accent); }
+    input, select, button { font: inherit; padding: 8px 10px; border-radius: 4px; border: 1px solid var(--ln-border); background: var(--ln-surface); color: var(--ln-text); }
+    button.primary { background: var(--ln-accent); color: var(--ln-on-accent); border-color: var(--ln-accent); }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
     table { width: 100%; border-collapse: collapse; background: var(--ln-surface); }
     th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--ln-border); font-size: 14px; }
     th { font-weight: 600; }
+    td.num { font-variant-numeric: tabular-nums; }
     .muted { color: var(--ln-muted); }
     .status { display: inline-block; min-width: 280px; }
-    #errorBox { display: none; background: var(--ln-warn-bg); border: 1px solid #ffe69c; padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
-    #probeBox { display: none; background: var(--ln-warn-bg); border: 1px solid #ffe69c; padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
+    #errorBox { display: none; background: var(--ln-warn-bg); border: 1px solid var(--ln-warn-border); padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
+    #probeBox { display: none; background: var(--ln-warn-bg); border: 1px solid var(--ln-warn-border); padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
+    #diffStrip { display: none; font-size: 14px; padding: 8px 10px; margin-bottom: 12px; background: var(--ln-surface); border: 1px dashed var(--ln-border); border-radius: 4px; }
+    #portBanner { display: none; background: var(--ln-warn-bg); border: 1px solid var(--ln-warn-border); padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
+    #portBanner .banner-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; }
     .first-run-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
     .first-run-overlay.open { display: flex; }
     .first-run-card { max-width: 520px; width: 100%; }
@@ -128,9 +141,16 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
 <body>
   <main>
     <h1>Lanternis</h1>
-    <p class="muted">Local network scanner (M1). Unknown means unknown; we do not invent confidence.</p>
+    <p class="muted">Local network scanner. Unknown means unknown; we do not invent confidence.</p>
     <div id="errorBox" role="status" aria-live="polite"></div>
     <div id="probeBox" class="muted" role="status" aria-live="polite"></div>
+    <div id="diffStrip" role="status" aria-live="polite"></div>
+    <div id="portBanner" role="region" aria-label="New open ports since last scan">
+      <div class="banner-row">
+        <span id="portBannerText"></span>
+        <button type="button" id="portBannerDismiss">Dismiss</button>
+      </div>
+    </div>
 
     <div id="firstRunOverlay" class="first-run-overlay" role="dialog" aria-modal="true" aria-labelledby="firstRunTitle">
       <div class="first-run-card panel">
@@ -159,6 +179,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         </label>
         <span id="statusText" class="status muted" aria-live="polite">Status: idle</span>
         <span id="probeBadge" class="muted" style="margin-left:8px;" aria-live="polite"></span>
+        <button type="button" id="themeToggle" title="Light or dark appearance">Appearance</button>
+        <button type="button" id="diffExportBtn" title="Download scan diff JSON">Export diff</button>
       </div>
       <p id="modeHint" class="muted" style="margin: 10px 0 0 0; font-size: 14px; line-height: 1.45;"></p>
     </section>
@@ -218,6 +240,14 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const hostCount = document.getElementById("hostCount");
     const modeHint = document.getElementById("modeHint");
     const probeBadge = document.getElementById("probeBadge");
+    const diffStrip = document.getElementById("diffStrip");
+    const portBanner = document.getElementById("portBanner");
+    const portBannerText = document.getElementById("portBannerText");
+    const portBannerDismiss = document.getElementById("portBannerDismiss");
+    const themeToggle = document.getElementById("themeToggle");
+    const diffExportBtn = document.getElementById("diffExportBtn");
+    const STORAGE_THEME = "ln_theme";
+    const STORAGE_PORT_DISMISS = "ln_port_banner_dismiss_scan_id";
 
     let currentHosts = [];
     let sort = { col: "ip", dir: "asc" };
@@ -453,9 +483,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       for (const h of rows) {
         const tr = document.createElement("tr");
         tr.innerHTML =
-          "<td>" + (h.ip || "") + "</td>" +
+          "<td class='num'>" + (h.ip || "") + "</td>" +
           "<td>" + (h.reachability || "unknown") + "</td>" +
-          "<td class='muted'>" + (Array.isArray(h.open_ports) && h.open_ports.length ? h.open_ports.join(", ") : "—") + "</td>" +
+          "<td class='muted num'>" + (Array.isArray(h.open_ports) && h.open_ports.length ? h.open_ports.join(", ") : "—") + "</td>" +
           "<td>" + (h.label || "Unknown") + "</td>" +
           "<td>" + (h.confidence || "unknown") + "</td>" +
           "<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>" +
@@ -526,6 +556,106 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       await loadStatus();
     }
 
+    function initTheme() {
+      const saved = localStorage.getItem(STORAGE_THEME);
+      if (saved === "dark") {
+        document.documentElement.setAttribute("data-theme", "dark");
+      } else if (saved === "light") {
+        document.documentElement.removeAttribute("data-theme");
+      } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    }
+
+    function renderDiffStrip(d) {
+      if (!d || !d.previous_scan_id) {
+        diffStrip.style.display = "none";
+        diffStrip.textContent = "";
+        return;
+      }
+      const a = (d.hosts_added || []).length;
+      const r = (d.hosts_removed || []).length;
+      const c = (d.hosts_changed || []).length;
+      if (a + r + c === 0) {
+        diffStrip.style.display = "none";
+        diffStrip.textContent = "";
+        return;
+      }
+      diffStrip.style.display = "block";
+      const rLabel = r === 1 ? "1 host" : r + " hosts";
+      diffStrip.textContent = "Since last scan: +" + a + " hosts · −" + rLabel + (c ? " · " + c + " changed" : "");
+    }
+
+    function renderPortBanner(d) {
+      if (!d || !d.new_open_ports || !d.new_open_ports.length) {
+        portBanner.style.display = "none";
+        return;
+      }
+      const sid = d.current_scan_id || 0;
+      if (localStorage.getItem(STORAGE_PORT_DISMISS) === String(sid)) {
+        portBanner.style.display = "none";
+        return;
+      }
+      const n = d.new_open_ports.length;
+      portBanner.style.display = "block";
+      portBannerText.textContent = "New open ports on " + n + " host" + (n === 1 ? "" : "s") + " since last scan (" + (d.cidr || "scan range") + ").";
+    }
+
+    async function loadDiff() {
+      try {
+        const d = await fetchJSON("/api/scan/diff");
+        renderDiffStrip(d);
+        renderPortBanner(d);
+      } catch (e) {
+        diffStrip.style.display = "none";
+        portBanner.style.display = "none";
+      }
+    }
+
+    async function tick() {
+      try {
+        await loadStatus();
+        await loadHosts();
+        await loadDiff();
+      } catch (e) {
+        showError(e.message);
+      }
+    }
+
+    themeToggle.addEventListener("click", () => {
+      const dark = document.documentElement.getAttribute("data-theme") === "dark";
+      if (dark) {
+        document.documentElement.removeAttribute("data-theme");
+        localStorage.setItem(STORAGE_THEME, "light");
+      } else {
+        document.documentElement.setAttribute("data-theme", "dark");
+        localStorage.setItem(STORAGE_THEME, "dark");
+      }
+    });
+    portBannerDismiss.addEventListener("click", () => {
+      fetchJSON("/api/scan/diff").then((d) => {
+        if (d && d.current_scan_id) {
+          localStorage.setItem(STORAGE_PORT_DISMISS, String(d.current_scan_id));
+        }
+        portBanner.style.display = "none";
+      }).catch(() => { portBanner.style.display = "none"; });
+    });
+    diffExportBtn.addEventListener("click", () => {
+      fetch("/api/scan/diff/export", { method: "POST", headers: { "X-CSRF-Token": csrfToken } })
+        .then((res) => {
+          if (!res.ok) throw new Error("export failed: " + res.status);
+          return res.blob();
+        })
+        .then((blob) => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "lanternis-scan-diff.json";
+          a.click();
+          URL.revokeObjectURL(url);
+        })
+        .catch((e) => showError(e.message));
+    });
     startBtn.addEventListener("click", () => startScan().catch((e) => showError(e.message)));
     cancelBtn.addEventListener("click", () => cancelScan().catch((e) => showError(e.message)));
     setupContinueBtn.addEventListener("click", () => completeFirstRun().catch((e) => showError(e.message)));
@@ -542,17 +672,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       });
     }
 
-    async function tick() {
-      try {
-        await loadStatus();
-        await loadHosts();
-      } catch (e) {
-        showError(e.message);
-      }
-    }
-
     (async function boot() {
       try {
+        initTheme();
         await initCSRF();
         await loadSetupStatus();
         refreshModeHint();
@@ -702,6 +824,26 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, _, err := net.ParseCIDR(req.CIDR); err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("invalid CIDR"))
+		return
+	}
+
+	if s.scanner.Status().Running {
+		writeErr(w, http.StatusConflict, errors.New("scan already running"))
+		return
+	}
+
+	dbRunID, err := s.store.InsertScanRun(r.Context(), req.Mode, req.CIDR)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	scanStartedAt := time.Now()
+	passiveDone := make(chan passiveOutcome, 1)
+	go s.runPassiveDiscovery(req.CIDR, passiveDone)
+
 	// Important: do not bind the scan lifetime to the HTTP request context.
 	// Request contexts are cancelled when the handler returns, which would immediately cancel the scan.
 	scanRunID, err := s.scanner.Start(context.Background(), req.CIDR, discovery.ScanOptions{
@@ -718,6 +860,7 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		})
 	})
 	if err != nil {
+		_ = s.store.MarkScanEnded(context.Background(), dbRunID, true)
 		if err.Error() == "scan already running" {
 			writeErr(w, http.StatusConflict, err)
 			return
@@ -726,17 +869,8 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scanStartedAt := time.Now()
 	s.debugf("scan active probe start scanner_run_id=%d cidr=%s mode=%s concurrency=%d probe_mode=%s",
 		scanRunID, req.CIDR, req.Mode, req.Concurrency, discovery.ProbeMode())
-	passiveDone := make(chan passiveOutcome, 1)
-	go s.runPassiveDiscovery(req.CIDR, passiveDone)
-
-	dbRunID, err := s.store.InsertScanRun(r.Context(), req.Mode)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
 	s.debugf("scan db_run scan_id=%d scanner_run_id=%d cidr=%s", dbRunID, scanRunID, req.CIDR)
 	s.logger.Printf("scan started scan_id=%d cidr=%s mode=%s concurrency=%d", dbRunID, req.CIDR, req.Mode, req.Concurrency)
 	_ = audit.Append(r.Context(), s.store, "scan_started", map[string]any{
@@ -889,6 +1023,11 @@ func (s *Server) watchAndFinalize(dbRunID int64, scanStartedAt time.Time, cidr s
 			if err != nil {
 				s.logger.Printf("scan summary scan_id=%d: list hosts: %v", dbRunID, err)
 				return
+			}
+			if !cancelled {
+				if err := s.store.ReplaceScanSnapshot(ctx, dbRunID, cidr, hosts); err != nil {
+					s.logger.Printf("scan snapshot scan_id=%d: %v", dbRunID, err)
+				}
 			}
 			reach, unreach, unk, obs := countReachabilityInCIDR(hosts, cidr)
 			s.logger.Printf("scan summary scan_id=%d cidr=%s active_probed=%d reachable=%d unreachable=%d unknown=%d observed=%d passive_arp_merged=%d passive_ssdp_merged=%d passive_mdns_merged=%d",
