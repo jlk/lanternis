@@ -16,6 +16,7 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 	}
 	rec := &Record{SchemaVersion: 1}
 	ports := portSet(h.OpenPorts)
+	var pctx ProbeContext
 
 	// L1: OUI from ARP MAC.
 	if arp, ok := hints["arp"].(map[string]any); ok {
@@ -27,10 +28,21 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 
+	// Reverse DNS (PTR) — often encodes appliance role on local DNS / ISP resolvers.
+	ptrNames, _ := LookupPTR(ctx, h.IP)
+	pctx.PTRNames = ptrNames
+	for _, name := range ptrNames {
+		rec.Signals = append(rec.Signals, Signal{Source: "ptr", Field: "name", Value: truncate(name, 200)})
+	}
+	if len(ptrNames) > 0 {
+		rec.LadderMax = maxInt(rec.LadderMax, 2)
+	}
+
 	// UPnP device description (L4 when model/manufacturer present).
 	if ssdp, ok := hints["ssdp"].(map[string]any); ok {
 		if loc, ok := ssdp["location"].(string); ok && strings.TrimSpace(loc) != "" {
-			dev, err := FetchUPnPDeviceDescription(ctx, client, strings.TrimSpace(loc))
+			loc = strings.TrimSpace(loc)
+			dev, err := FetchUPnPDeviceDescription(ctx, client, loc)
 			if err == nil {
 				if dev.Manufacturer != "" {
 					rec.Manufacturer = dev.Manufacturer
@@ -73,34 +85,64 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 
-	// Active probes when ports open and we still lack strong L4.
 	needProbe := rec.LadderMax < 4 || rec.Model == ""
-	if needProbe {
-		if ports["80"] {
-			if title, err := FetchHTTPTitle(ctx, client, h.IP, "80"); err == nil && title != "" {
+
+	// HTTP(S) on open web ports — title, Server header, and classification keywords.
+	if ports["80"] {
+		title, server, err := FetchHTTPIndexMeta(ctx, client, "http", h.IP, "80")
+		if err == nil {
+			pctx.HTTPTitle80 = title
+			pctx.HTTPServer80 = server
+			if title != "" {
 				rec.Signals = append(rec.Signals, Signal{Source: "http_title", Field: "title", Value: truncate(title, 200)})
-				if rec.Model == "" && title != "" {
+				if needProbe && rec.Model == "" {
 					rec.Model = title
 				}
 				rec.LadderMax = maxInt(rec.LadderMax, 4)
 			}
-		}
-		if ports["443"] {
-			if cn, err := TLSCertNames(ctx, h.IP, "443"); err == nil && cn != "" {
-				rec.Signals = append(rec.Signals, Signal{Source: "tls_cert", Field: "dns_or_cn", Value: truncate(cn, 200)})
-				rec.LadderMax = maxInt(rec.LadderMax, 4)
-				if rec.Model == "" {
-					rec.Model = cn
-				}
-			}
-		}
-		if ports["22"] {
-			if banner, err := FetchSSHBanner(ctx, h.IP, "22"); err == nil && banner != "" {
-				rec.Signals = append(rec.Signals, Signal{Source: "ssh_banner", Field: "line", Value: truncate(banner, 200)})
-				rec.LadderMax = maxInt(rec.LadderMax, 4)
+			if server != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "http_server", Field: "server", Value: truncate(server, 200)})
+				rec.LadderMax = maxInt(rec.LadderMax, 3)
 			}
 		}
 	}
+	if ports["443"] {
+		title, server, err := FetchHTTPIndexMeta(ctx, client, "https", h.IP, "443")
+		if err == nil {
+			pctx.HTTPTitle443 = title
+			pctx.HTTPServer443 = server
+			if title != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "http_title", Field: "title_https", Value: truncate(title, 200)})
+				if needProbe && rec.Model == "" {
+					rec.Model = title
+				}
+				rec.LadderMax = maxInt(rec.LadderMax, 4)
+			}
+			if server != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "http_server", Field: "server_https", Value: truncate(server, 200)})
+				rec.LadderMax = maxInt(rec.LadderMax, 3)
+			}
+		}
+		cn, err := TLSCertNames(ctx, h.IP, "443")
+		if err == nil && cn != "" {
+			pctx.TLSCN = cn
+			rec.Signals = append(rec.Signals, Signal{Source: "tls_cert", Field: "dns_or_cn", Value: truncate(cn, 200)})
+			rec.LadderMax = maxInt(rec.LadderMax, 4)
+			if needProbe && rec.Model == "" {
+				rec.Model = cn
+			}
+		}
+	}
+	if ports["22"] {
+		banner, err := FetchSSHBanner(ctx, h.IP, "22")
+		if err == nil && banner != "" {
+			pctx.SSHBanner = banner
+			rec.Signals = append(rec.Signals, Signal{Source: "ssh_banner", Field: "line", Value: truncate(banner, 200)})
+			rec.LadderMax = maxInt(rec.LadderMax, 4)
+		}
+	}
+
+	ClassifyDevice(rec, h, hints, pctx)
 
 	rec.Summary = summarize(rec)
 	if rec.LadderMax == 0 && len(rec.Signals) == 0 {
@@ -164,6 +206,9 @@ func summarize(rec *Record) string {
 		if sig.Source == "ssh_banner" && sig.Value != "" {
 			return sig.Value
 		}
+	}
+	if rec.DeviceClass != "" {
+		return rec.DeviceClass
 	}
 	return ""
 }

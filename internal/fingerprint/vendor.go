@@ -34,3 +34,15 @@ func VendorFromJSON(blob json.RawMessage) string {
 	}
 	return VendorFromRecord(&rec)
 }
+
+// ListExtrasFromFingerprint parses fingerprint_blob once for API list rows (vendor + device class).
+func ListExtrasFromFingerprint(blob json.RawMessage) (vendor, deviceClass string) {
+	if len(blob) == 0 {
+		return "", ""
+	}
+	var rec Record
+	if err := json.Unmarshal(blob, &rec); err != nil {
+		return "", ""
+	}
+	return VendorFromRecord(&rec), rec.DeviceClass
+}

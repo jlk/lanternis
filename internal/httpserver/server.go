@@ -263,6 +263,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
             <th data-col="reachability" role="button" tabindex="0" title="Sort by reachability">Reachability</th>
             <th data-col="open_ports" role="button" tabindex="0" title="Sort by open ports (active probe)">Open ports</th>
             <th data-col="vendor" role="button" tabindex="0" title="Sort by vendor (fingerprint)">Vendor</th>
+            <th data-col="device_class" role="button" tabindex="0" title="Sort by inferred device kind">Kind</th>
             <th data-col="label" role="button" tabindex="0" title="Sort by label">Label</th>
             <th data-col="confidence" role="button" tabindex="0" title="Sort by confidence">Confidence</th>
             <th data-col="last_seen" role="button" tabindex="0" title="Sort by last seen">Last seen</th>
@@ -512,6 +513,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         if (sort.col === "vendor") {
           return dir * String(a.vendor || "").toLowerCase().localeCompare(String(b.vendor || "").toLowerCase());
         }
+        if (sort.col === "device_class") {
+          return dir * String(a.device_class || "").toLowerCase().localeCompare(String(b.device_class || "").toLowerCase());
+        }
         const av = String((a[sort.col] ?? "")).toLowerCase();
         const bv = String((b[sort.col] ?? "")).toLowerCase();
         return dir * av.localeCompare(bv);
@@ -536,14 +540,14 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       hostsBody.innerHTML = "";
       if (!total) {
         hostCount.textContent = "";
-        hostsBody.innerHTML = "<tr><td colspan='8' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
+        hostsBody.innerHTML = "<tr><td colspan='9' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
         return;
       }
       if (!rows.length) {
         if (hideUnknownReach.checked && hiddenUnknown > 0) {
-          hostsBody.innerHTML = "<tr><td colspan='8' class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
+          hostsBody.innerHTML = "<tr><td colspan='9' class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
         } else {
-          hostsBody.innerHTML = "<tr><td colspan='8' class='muted'>No rows to show.</td></tr>";
+          hostsBody.innerHTML = "<tr><td colspan='9' class='muted'>No rows to show.</td></tr>";
         }
         hostCount.textContent = "Showing 0 of " + total + (hiddenUnknown ? " (" + hiddenUnknown + " hidden)" : "");
         return;
@@ -557,11 +561,13 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         tr.setAttribute("role", "button");
         tr.setAttribute("title", "Show device details");
         const vend = String(h.vendor || "").trim();
+        const kind = String(h.device_class || "").trim();
         tr.innerHTML =
           "<td class='num'>" + (h.ip || "") + "</td>" +
           "<td>" + (h.reachability || "unknown") + "</td>" +
           "<td class='muted num'>" + (Array.isArray(h.open_ports) && h.open_ports.length ? h.open_ports.join(", ") : "—") + "</td>" +
           "<td class='muted'>" + (vend ? esc(vend) : "—") + "</td>" +
+          "<td class='muted'>" + (kind ? esc(kind) : "—") + "</td>" +
           "<td>" + (h.label || "Unknown") + "</td>" +
           "<td>" + (h.confidence || "unknown") + "</td>" +
           "<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>" +
@@ -607,7 +613,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       const hist = d.scan_history || [];
       const fp = h.fingerprint || null;
       const vendorDisp = String(h.vendor || "").trim();
-      let fpHtml = "<p class='muted'>No fingerprint record yet. After a scan completes, we store merged evidence (SSDP/UPnP device description, OUI, HTTP title, TLS cert, SSH banner when ports are open).</p>";
+      let fpHtml = "<p class='muted'>No fingerprint record yet. After a scan completes, we store merged evidence: passive ARP / SSDP / mDNS, reverse DNS (PTR), UPnP device XML when available, OUI, HTTP(S) title and Server headers, TLS cert names, and SSH banners on open ports.</p>";
       if (fp && typeof fp === "object") {
         const sigs = fp.signals || [];
         const sigLis = sigs.map(function (s) {
@@ -618,6 +624,10 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         fpHtml = "<dl class='fp-dl'>";
         if (fp.ladder_max != null && fp.ladder_max !== undefined) {
           fpHtml += "<dt>Identity ladder</dt><dd>L" + esc(String(fp.ladder_max)) + " (see docs)</dd>";
+        }
+        const kindDisp = String(h.device_class || fp.device_class || "").trim();
+        if (kindDisp) {
+          fpHtml += "<dt>Inferred kind</dt><dd>" + esc(kindDisp) + " <span class='muted'>(fused ports, SSDP types, PTR, HTTP banners)</span></dd>";
         }
         if (fp.summary) {
           fpHtml += "<dt>Summary</dt><dd>" + esc(fp.summary) + "</dd>";
@@ -661,9 +671,14 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       const vendorLine = vendorDisp
         ? "<strong>" + esc(vendorDisp) + "</strong>" + (vsub ? " <span class='muted'>(" + esc(vsub) + ")</span>" : "")
         : "<span class='muted'>—</span>";
+      const kindRow = String(h.device_class || (fp && fp.device_class) || "").trim();
+      const kindLine = kindRow
+        ? "<strong>" + esc(kindRow) + "</strong> <span class='muted'>(heuristic)</span>"
+        : "<span class='muted'>—</span>";
       hostDetailContent.innerHTML =
         "<section class='host-detail-section'><h3>Address</h3><p style='margin:0;'><code>" + esc(h.ip || "") + "</code></p></section>" +
-        "<section class='host-detail-section'><h3>Current row</h3><p style='margin:0 0 8px 0;'>Vendor " + vendorLine + "</p>" +
+        "<section class='host-detail-section'><h3>Current row</h3><p style='margin:0 0 8px 0;'>Kind " + kindLine + "</p>" +
+        "<p style='margin:0 0 8px 0;'>Vendor " + vendorLine + "</p>" +
         "<p style='margin:0 0 8px 0;'>Reachability <strong>" + esc(h.reachability || "unknown") + "</strong> · Confidence <strong>" + esc(h.confidence || "unknown") + "</strong> · Last seen " +
         (h.last_seen ? fmtDetailTime(h.last_seen) : "—") + "</p>" +
         "<p style='margin:0;'>Open ports: <code>" + esc((h.open_ports && h.open_ports.length) ? h.open_ports.join(", ") : "—") + "</code></p></section>" +

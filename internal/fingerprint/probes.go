@@ -14,34 +14,48 @@ import (
 
 var reHTMLTitle = regexp.MustCompile(`(?is)<title[^>]*>([^<]+)</title>`)
 
-// FetchHTTPTitle performs a short GET to http://ip:port/ and returns trimmed title text, or "".
-func FetchHTTPTitle(ctx context.Context, client *http.Client, ip, port string) (string, error) {
+// FetchHTTPIndexMeta performs a GET to scheme://ip:port/ and returns HTML title and Server header when present.
+// Non-2xx responses still contribute Server / body (many appliances return titles on 401/404).
+func FetchHTTPIndexMeta(ctx context.Context, client *http.Client, scheme, ip, port string) (title, server string, err error) {
 	if client == nil {
 		client = DefaultHTTPClient()
 	}
-	u := fmt.Sprintf("http://%s/", net.JoinHostPort(ip, port))
+	if scheme != "http" && scheme != "https" {
+		return "", "", fmt.Errorf("unsupported scheme %q", scheme)
+	}
+	u := fmt.Sprintf("%s://%s/", scheme, net.JoinHostPort(ip, port))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	req.Header.Set("User-Agent", "Lanternis/1.0")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("http %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 96*1024))
-	if err != nil {
-		return "", err
+	server = strings.TrimSpace(resp.Header.Get("Server"))
+	body, rerr := io.ReadAll(io.LimitReader(resp.Body, 96*1024))
+	if rerr != nil {
+		return "", server, rerr
 	}
 	m := reHTMLTitle.FindSubmatch(body)
-	if len(m) < 2 {
-		return "", nil
+	if len(m) >= 2 {
+		title = strings.TrimSpace(string(m[1]))
 	}
-	return strings.TrimSpace(string(m[1])), nil
+	if server != "" || title != "" {
+		return title, server, nil
+	}
+	if resp.StatusCode >= 400 {
+		return "", "", fmt.Errorf("http %d", resp.StatusCode)
+	}
+	return "", "", nil
+}
+
+// FetchHTTPTitle performs a short GET to http://ip:port/ and returns trimmed title text, or "".
+func FetchHTTPTitle(ctx context.Context, client *http.Client, ip, port string) (string, error) {
+	t, _, err := FetchHTTPIndexMeta(ctx, client, "http", ip, port)
+	return t, err
 }
 
 // TLSCertNames connects with InsecureSkipVerify and returns a representative DNS name from the leaf cert, or "".

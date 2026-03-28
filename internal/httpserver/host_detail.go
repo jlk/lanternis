@@ -10,16 +10,19 @@ import (
 	"github.com/jlk/lanternis/internal/store"
 )
 
-// hostJSON is the API shape for one host row, including a derived vendor label.
+// hostJSON is the API shape for one host row, including derived vendor and device class.
 type hostJSON struct {
 	store.Host
-	Vendor string `json:"vendor,omitempty"`
+	Vendor      string `json:"vendor,omitempty"`
+	DeviceClass string `json:"device_class,omitempty"`
 }
 
 func newHostJSON(h store.Host) hostJSON {
+	v, dc := fingerprint.ListExtrasFromFingerprint(h.Fingerprint)
 	return hostJSON{
-		Host:   h,
-		Vendor: fingerprint.VendorFromJSON(h.Fingerprint),
+		Host:        h,
+		Vendor:      v,
+		DeviceClass: dc,
 	}
 }
 

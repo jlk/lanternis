@@ -13,13 +13,16 @@ type Record struct {
 	FirmwareVersion string `json:"firmware_version,omitempty"`
 	Serial          string `json:"serial,omitempty"`
 
+	// DeviceClass is an L2-style role guess (printer, camera, router, …) from fused hints.
+	DeviceClass string `json:"device_class,omitempty"`
+
 	Signals []Signal `json:"signals,omitempty"`
 	Summary string   `json:"summary,omitempty"`
 }
 
 // Signal is one piece of evidence backing the record.
 type Signal struct {
-	Source string `json:"source"` // oui, upnp_xml, http_title, tls_cert, ssh_banner, mdns_name
+	Source string `json:"source"` // oui, upnp_xml, http_title, http_server, tls_cert, ssh_banner, mdns_name, ptr, ssdp_st, device_class
 	Field  string `json:"field,omitempty"`
 	Value  string `json:"value,omitempty"`
 }
