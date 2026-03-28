@@ -21,13 +21,13 @@ type ScanHostSnapshot struct {
 
 // ScanDiff is a CIDR-scoped comparison between two completed scan snapshots.
 type ScanDiff struct {
-	CurrentScanID   int64              `json:"current_scan_id"`
-	PreviousScanID  int64              `json:"previous_scan_id,omitempty"`
-	CIDR            string             `json:"cidr"`
-	HostsAdded      []ScanHostSnapshot `json:"hosts_added"`
-	HostsRemoved    []ScanHostSnapshot `json:"hosts_removed"`
-	HostsChanged    []HostChange       `json:"hosts_changed"`
-	NewOpenPorts    []PortOpenDelta    `json:"new_open_ports"`
+	CurrentScanID  int64              `json:"current_scan_id"`
+	PreviousScanID int64              `json:"previous_scan_id,omitempty"`
+	CIDR           string             `json:"cidr"`
+	HostsAdded     []ScanHostSnapshot `json:"hosts_added"`
+	HostsRemoved   []ScanHostSnapshot `json:"hosts_removed"`
+	HostsChanged   []HostChange       `json:"hosts_changed"`
+	NewOpenPorts   []PortOpenDelta    `json:"new_open_ports"`
 }
 
 // HostChange is a host present in both scans with some field delta.
@@ -322,4 +322,3 @@ func diffOpenPorts(prev, cur []string) []string {
 	sort.Strings(out)
 	return out
 }
-

@@ -52,15 +52,15 @@ func (s *Server) buildDiagnostics(ctx context.Context) (map[string]any, error) {
 		lastScan = m
 	}
 	return map[string]any{
-		"version":         s.version,
-		"go_version":      runtime.Version(),
-		"module_path":     modPath,
-		"module_version":  modVer,
-		"db_path":         s.dbPath,
+		"version":            s.version,
+		"go_version":         runtime.Version(),
+		"module_path":        modPath,
+		"module_version":     modVer,
+		"db_path":            s.dbPath,
 		"probe_mode":         discovery.ProbeMode(),
 		"probe_guidance":     discovery.ProbeGuidance(),
 		"tcp_probe_profiles": discovery.TCPProbeProfiles(),
-		"scan_status":     s.scanner.Status(),
+		"scan_status":        s.scanner.Status(),
 		"concurrency_modes": map[string]int{
 			"light":    12,
 			"normal":   32,
