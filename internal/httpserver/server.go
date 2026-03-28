@@ -262,6 +262,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
             <th data-col="ip" role="button" tabindex="0" title="Sort by IP">IP</th>
             <th data-col="reachability" role="button" tabindex="0" title="Sort by reachability">Reachability</th>
             <th data-col="open_ports" role="button" tabindex="0" title="Sort by open ports (active probe)">Open ports</th>
+            <th data-col="vendor" role="button" tabindex="0" title="Sort by vendor (fingerprint)">Vendor</th>
             <th data-col="label" role="button" tabindex="0" title="Sort by label">Label</th>
             <th data-col="confidence" role="button" tabindex="0" title="Sort by confidence">Confidence</th>
             <th data-col="last_seen" role="button" tabindex="0" title="Sort by last seen">Last seen</th>
@@ -508,6 +509,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         if (sort.col === "reachability") return dir * (rankReachability(a.reachability) - rankReachability(b.reachability));
         if (sort.col === "open_ports") return dir * openPortsSortKey(a).localeCompare(openPortsSortKey(b));
         if (sort.col === "hints") return dir * hintSummary(a).localeCompare(hintSummary(b));
+        if (sort.col === "vendor") {
+          return dir * String(a.vendor || "").toLowerCase().localeCompare(String(b.vendor || "").toLowerCase());
+        }
         const av = String((a[sort.col] ?? "")).toLowerCase();
         const bv = String((b[sort.col] ?? "")).toLowerCase();
         return dir * av.localeCompare(bv);
@@ -532,14 +536,14 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       hostsBody.innerHTML = "";
       if (!total) {
         hostCount.textContent = "";
-        hostsBody.innerHTML = "<tr><td colspan='7' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
+        hostsBody.innerHTML = "<tr><td colspan='8' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
         return;
       }
       if (!rows.length) {
         if (hideUnknownReach.checked && hiddenUnknown > 0) {
-          hostsBody.innerHTML = "<tr><td colspan='7' class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
+          hostsBody.innerHTML = "<tr><td colspan='8' class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
         } else {
-          hostsBody.innerHTML = "<tr><td colspan='7' class='muted'>No rows to show.</td></tr>";
+          hostsBody.innerHTML = "<tr><td colspan='8' class='muted'>No rows to show.</td></tr>";
         }
         hostCount.textContent = "Showing 0 of " + total + (hiddenUnknown ? " (" + hiddenUnknown + " hidden)" : "");
         return;
@@ -552,10 +556,12 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         tr.setAttribute("tabindex", "0");
         tr.setAttribute("role", "button");
         tr.setAttribute("title", "Show device details");
+        const vend = String(h.vendor || "").trim();
         tr.innerHTML =
           "<td class='num'>" + (h.ip || "") + "</td>" +
           "<td>" + (h.reachability || "unknown") + "</td>" +
           "<td class='muted num'>" + (Array.isArray(h.open_ports) && h.open_ports.length ? h.open_ports.join(", ") : "—") + "</td>" +
+          "<td class='muted'>" + (vend ? esc(vend) : "—") + "</td>" +
           "<td>" + (h.label || "Unknown") + "</td>" +
           "<td>" + (h.confidence || "unknown") + "</td>" +
           "<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>" +
@@ -580,10 +586,27 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       }
     }
 
+    function vendorSubtitle(fp) {
+      if (!fp || typeof fp !== "object") {
+        return "";
+      }
+      if (fp.manufacturer) {
+        return "from device description (UPnP)";
+      }
+      const sigs = fp.signals || [];
+      for (let i = 0; i < sigs.length; i++) {
+        if (sigs[i].source === "oui") {
+          return "from IEEE OUI (MAC prefix)";
+        }
+      }
+      return "";
+    }
+
     function renderHostDetail(d) {
       const h = d.host;
       const hist = d.scan_history || [];
       const fp = h.fingerprint || null;
+      const vendorDisp = String(h.vendor || "").trim();
       let fpHtml = "<p class='muted'>No fingerprint record yet. After a scan completes, we store merged evidence (SSDP/UPnP device description, OUI, HTTP title, TLS cert, SSH banner when ports are open).</p>";
       if (fp && typeof fp === "object") {
         const sigs = fp.signals || [];
@@ -634,9 +657,14 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         histHtml += "</tbody></table>";
       }
       const hintsStr = JSON.stringify(h.raw_hints || {}, null, 2);
+      const vsub = vendorSubtitle(fp);
+      const vendorLine = vendorDisp
+        ? "<strong>" + esc(vendorDisp) + "</strong>" + (vsub ? " <span class='muted'>(" + esc(vsub) + ")</span>" : "")
+        : "<span class='muted'>—</span>";
       hostDetailContent.innerHTML =
         "<section class='host-detail-section'><h3>Address</h3><p style='margin:0;'><code>" + esc(h.ip || "") + "</code></p></section>" +
-        "<section class='host-detail-section'><h3>Current row</h3><p style='margin:0 0 8px 0;'>Reachability <strong>" + esc(h.reachability || "unknown") + "</strong> · Confidence <strong>" + esc(h.confidence || "unknown") + "</strong> · Last seen " +
+        "<section class='host-detail-section'><h3>Current row</h3><p style='margin:0 0 8px 0;'>Vendor " + vendorLine + "</p>" +
+        "<p style='margin:0 0 8px 0;'>Reachability <strong>" + esc(h.reachability || "unknown") + "</strong> · Confidence <strong>" + esc(h.confidence || "unknown") + "</strong> · Last seen " +
         (h.last_seen ? fmtDetailTime(h.last_seen) : "—") + "</p>" +
         "<p style='margin:0;'>Open ports: <code>" + esc((h.open_ports && h.open_ports.length) ? h.open_ports.join(", ") : "—") + "</code></p></section>" +
         "<section class='host-detail-section'><h3>Fingerprint reasoning</h3>" + fpHtml + "</section>" +
@@ -983,7 +1011,11 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"hosts": hosts})
+	out := make([]hostJSON, len(hosts))
+	for i := range hosts {
+		out[i] = newHostJSON(hosts[i])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"hosts": out})
 }
 
 func (s *Server) handleRuntime(w http.ResponseWriter, r *http.Request) {

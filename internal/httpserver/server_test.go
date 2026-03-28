@@ -374,6 +374,10 @@ func TestHostDetailAPI(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	fp := `{"schema_version":1,"ladder_max":4,"manufacturer":"AcmeTest","signals":[{"source":"upnp_xml","field":"location","value":"http://example/desc.xml"}]}`
+	if err := st.UpdateHostIdentity(ctx, "10.0.0.5", "Unit", "low", fp); err != nil {
+		t.Fatal(err)
+	}
 	id, err := st.InsertScanRun(ctx, "normal", "10.0.0.0/24")
 	if err != nil {
 		t.Fatal(err)
@@ -393,7 +397,10 @@ func TestHostDetailAPI(t *testing.T) {
 		t.Fatalf("expected 200, got %d %s", rec.Code, rec.Body.String())
 	}
 	var out struct {
-		Host        store.Host                   `json:"host"`
+		Host struct {
+			store.Host
+			Vendor string `json:"vendor"`
+		} `json:"host"`
 		ScanHistory []store.HostScanHistoryEntry `json:"scan_history"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
@@ -401,6 +408,9 @@ func TestHostDetailAPI(t *testing.T) {
 	}
 	if out.Host.IP != "10.0.0.5" || out.Host.Label != "Unit" {
 		t.Fatalf("host: %+v", out.Host)
+	}
+	if out.Host.Vendor != "AcmeTest" {
+		t.Fatalf("vendor: got %q", out.Host.Vendor)
 	}
 	if len(out.ScanHistory) != 1 || out.ScanHistory[0].ScanID != id {
 		t.Fatalf("history: %+v", out.ScanHistory)

@@ -5,7 +5,23 @@ import (
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/jlk/lanternis/internal/fingerprint"
+	"github.com/jlk/lanternis/internal/store"
 )
+
+// hostJSON is the API shape for one host row, including a derived vendor label.
+type hostJSON struct {
+	store.Host
+	Vendor string `json:"vendor,omitempty"`
+}
+
+func newHostJSON(h store.Host) hostJSON {
+	return hostJSON{
+		Host:   h,
+		Vendor: fingerprint.VendorFromJSON(h.Fingerprint),
+	}
+}
 
 func (s *Server) handleHostDetail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -36,7 +52,7 @@ func (s *Server) handleHostDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"host":         host,
+		"host":         newHostJSON(*host),
 		"scan_history": hist,
 	})
 }
