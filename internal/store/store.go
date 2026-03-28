@@ -250,6 +250,105 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	return out, rows.Err()
 }
 
+// GetHost returns one host by IP, or nil if not found.
+func (s *Store) GetHost(ctx context.Context, ip string) (*Host, error) {
+	var h Host
+	var portsJSON, legacyOpenPort string
+	var lastSeen string
+	var rawHints, fpBlob sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT ip, reachability, open_ports_json, open_port, label, confidence, last_seen, raw_hints_json, fingerprint_blob
+		FROM hosts WHERE ip = ?`, ip).Scan(
+		&h.IP, &h.Reachability, &portsJSON, &legacyOpenPort, &h.Label, &h.Confidence, &lastSeen, &rawHints, &fpBlob)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	h.OpenPorts = decodeOpenPortsJSON(portsJSON)
+	if len(h.OpenPorts) == 0 && legacyOpenPort != "" {
+		h.OpenPorts = []string{legacyOpenPort}
+	}
+	sortOpenPortsNumeric(h.OpenPorts)
+	if t, err := time.Parse(time.RFC3339Nano, lastSeen); err == nil {
+		h.LastSeen = t
+	} else if t, err := time.Parse(time.RFC3339, lastSeen); err == nil {
+		h.LastSeen = t
+	}
+	if rawHints.Valid && rawHints.String != "" && rawHints.String != "{}" {
+		h.RawHints = json.RawMessage(rawHints.String)
+	}
+	if fpBlob.Valid && fpBlob.String != "" {
+		h.Fingerprint = json.RawMessage(fpBlob.String)
+	}
+	return &h, nil
+}
+
+// HostScanHistoryEntry is this host's row in a retained per-scan snapshot.
+type HostScanHistoryEntry struct {
+	ScanID          int64      `json:"scan_id"`
+	StartedAt       time.Time  `json:"started_at"`
+	EndedAt         *time.Time `json:"ended_at,omitempty"`
+	Mode            string     `json:"mode"`
+	CIDR            string     `json:"cidr"`
+	CancelRequested bool       `json:"cancel_requested"`
+	Reachability    string     `json:"reachability"`
+	Label           string     `json:"label"`
+	Confidence      string     `json:"confidence"`
+	OpenPorts       []string   `json:"open_ports"`
+}
+
+// HostScanHistory returns recent snapshot rows for one IP (newest scan first).
+func (s *Store) HostScanHistory(ctx context.Context, ip string, limit int) ([]HostScanHistoryEntry, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT s.scan_id, r.started_at, r.ended_at, r.mode, r.cidr, r.cancel_requested,
+		       s.reachability, s.open_ports_json, s.label, s.confidence
+		FROM scan_host_snapshots s
+		INNER JOIN scan_runs r ON r.id = s.scan_id
+		WHERE s.ip = ?
+		ORDER BY s.scan_id DESC
+		LIMIT ?`, ip, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]HostScanHistoryEntry, 0)
+	for rows.Next() {
+		var e HostScanHistoryEntry
+		var startedStr string
+		var ended sql.NullString
+		var cancel int
+		var portsJSON string
+		if err := rows.Scan(&e.ScanID, &startedStr, &ended, &e.Mode, &e.CIDR, &cancel, &e.Reachability, &portsJSON, &e.Label, &e.Confidence); err != nil {
+			return nil, err
+		}
+		e.CancelRequested = cancel != 0
+		if t, e1 := time.Parse(time.RFC3339Nano, startedStr); e1 == nil {
+			e.StartedAt = t
+		} else {
+			e.StartedAt, _ = time.Parse(time.RFC3339, startedStr)
+		}
+		if ended.Valid && ended.String != "" {
+			t, e1 := time.Parse(time.RFC3339Nano, ended.String)
+			if e1 != nil {
+				t, _ = time.Parse(time.RFC3339, ended.String)
+			}
+			e.EndedAt = &t
+		}
+		e.OpenPorts = decodeOpenPortsJSON(portsJSON)
+		sortOpenPortsNumeric(e.OpenPorts)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func marshalOpenPortsJSON(ports []string) (string, error) {
 	if len(ports) == 0 {
 		return "[]", nil

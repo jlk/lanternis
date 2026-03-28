@@ -365,6 +365,55 @@ func TestScanRunsEndpoint(t *testing.T) {
 	}
 }
 
+func TestHostDetailAPI(t *testing.T) {
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	if err := st.UpsertHost(ctx, store.Host{
+		IP: "10.0.0.5", Reachability: "reachable", Label: "Unit", Confidence: "low",
+		LastSeen: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.InsertScanRun(ctx, "normal", "10.0.0.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts, err := st.ListHosts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceScanSnapshot(ctx, id, "10.0.0.0/24", hosts); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/host?ip=10.0.0.5", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Host        store.Host                   `json:"host"`
+		ScanHistory []store.HostScanHistoryEntry `json:"scan_history"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Host.IP != "10.0.0.5" || out.Host.Label != "Unit" {
+		t.Fatalf("host: %+v", out.Host)
+	}
+	if len(out.ScanHistory) != 1 || out.ScanHistory[0].ScanID != id {
+		t.Fatalf("history: %+v", out.ScanHistory)
+	}
+
+	miss := httptest.NewRequest(http.MethodGet, "/api/host?ip=10.0.0.99", nil)
+	missRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(missRec, miss)
+	if missRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown ip, got %d", missRec.Code)
+	}
+}
+
 func TestScanStartForbiddenBeforeFirstRun(t *testing.T) {
 	srv, _ := newTestServerWithoutFirstRun(t)
 	token, cookie := csrfTokenAndCookie(t, srv)

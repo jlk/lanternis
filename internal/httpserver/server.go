@@ -77,6 +77,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/csrf", s.handleCSRF)
 	s.mux.HandleFunc("/api/diagnostics", s.handleDiagnostics)
 	s.mux.HandleFunc("/api/hosts", s.handleHosts)
+	s.mux.HandleFunc("/api/host", s.handleHostDetail)
 	s.mux.HandleFunc("/api/runtime", s.handleRuntime)
 	s.mux.HandleFunc("/api/setup/status", s.handleSetupStatus)
 	s.mux.HandleFunc("/api/setup/complete", s.requireCSRF(s.handleSetupComplete))
@@ -140,6 +141,20 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     details.panel ul { margin: 0; padding-left: 1.25rem; color: var(--ln-muted); font-size: 14px; line-height: 1.5; }
     .table-toolbar { justify-content: space-between; align-items: center; margin-bottom: 8px; }
     caption { caption-side: top; text-align: left; font-size: 13px; color: var(--ln-muted); padding: 0 0 8px 0; }
+    #hostsTable tbody tr.host-row { cursor: pointer; }
+    #hostsTable tbody tr.host-row:hover { background: color-mix(in srgb, var(--ln-accent) 8%, transparent); }
+    .host-detail-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: none; align-items: center; justify-content: center; z-index: 1001; padding: 16px; }
+    .host-detail-overlay.open { display: flex; }
+    .host-detail-card { max-width: 720px; width: 100%; max-height: 88vh; overflow: auto; position: relative; }
+    .host-detail-card .hdr { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+    .host-detail-section { margin-bottom: 16px; }
+    .host-detail-section h3 { margin: 0 0 8px 0; font-size: 15px; font-weight: 600; }
+    .fp-dl { display: grid; grid-template-columns: 9rem 1fr; gap: 4px 12px; font-size: 14px; margin: 0; }
+    .fp-dl dt { color: var(--ln-muted); margin: 0; }
+    .fp-dl dd { margin: 0; }
+    .hints-pre { font-size: 12px; line-height: 1.4; overflow: auto; max-height: 220px; padding: 10px; background: var(--ln-bg); border: 1px solid var(--ln-border); border-radius: 4px; white-space: pre-wrap; word-break: break-word; }
+    .host-detail-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+    .host-detail-table th, .host-detail-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--ln-border); }
   </style>
 </head>
 <body>
@@ -172,6 +187,16 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         <div class="controls" style="margin-top: 8px;">
           <button type="button" id="setupContinueBtn" class="primary">Continue</button>
         </div>
+      </div>
+    </div>
+
+    <div id="hostDetailOverlay" class="host-detail-overlay" role="dialog" aria-modal="true" aria-labelledby="hostDetailTitle">
+      <div class="host-detail-card panel">
+        <div class="hdr">
+          <h2 id="hostDetailTitle" style="margin:0;font-size:1.15rem;">Device</h2>
+          <button type="button" id="hostDetailClose" class="muted" title="Close">Close</button>
+        </div>
+        <div id="hostDetailContent"></div>
       </div>
     </div>
 
@@ -230,8 +255,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         <label class="setup-check" style="margin:0;"><input type="checkbox" id="hideUnknownReach" checked /> Hide unknown reachability</label>
         <span id="hostCount" class="muted" aria-live="polite"></span>
       </div>
-      <table>
-        <caption>Devices seen on your LAN for this database. Sort columns by clicking headers.</caption>
+      <table id="hostsTable">
+        <caption>Devices seen on your LAN for this database. Sort columns by clicking headers. <strong>Click a row</strong> for fingerprint evidence, raw hints, and per-scan history.</caption>
         <thead>
           <tr>
             <th data-col="ip" role="button" tabindex="0" title="Sort by IP">IP</th>
@@ -280,6 +305,10 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const STORAGE_PORT_SNOOZE = "ln_port_banner_snooze_until";
     const scanRunsBody = document.getElementById("scanRunsBody");
     const portBannerSnooze = document.getElementById("portBannerSnooze");
+    const hostDetailOverlay = document.getElementById("hostDetailOverlay");
+    const hostDetailTitle = document.getElementById("hostDetailTitle");
+    const hostDetailContent = document.getElementById("hostDetailContent");
+    const hostDetailClose = document.getElementById("hostDetailClose");
 
     let currentHosts = [];
     let sort = { col: "ip", dir: "asc" };
@@ -518,6 +547,11 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       hostCount.textContent = "Showing " + rows.length + " of " + total + (hiddenUnknown ? " (" + hiddenUnknown + " unknown hidden)" : "");
       for (const h of rows) {
         const tr = document.createElement("tr");
+        tr.className = "host-row";
+        tr.setAttribute("data-ip", h.ip || "");
+        tr.setAttribute("tabindex", "0");
+        tr.setAttribute("role", "button");
+        tr.setAttribute("title", "Show device details");
         tr.innerHTML =
           "<td class='num'>" + (h.ip || "") + "</td>" +
           "<td>" + (h.reachability || "unknown") + "</td>" +
@@ -527,6 +561,110 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
           "<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>" +
           "<td class='muted'>" + hintSummary(h) + "</td>";
         hostsBody.appendChild(tr);
+      }
+    }
+
+    function esc(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function fmtDetailTime(iso) {
+      try {
+        return new Date(iso).toLocaleString();
+      } catch (e) {
+        return String(iso);
+      }
+    }
+
+    function renderHostDetail(d) {
+      const h = d.host;
+      const hist = d.scan_history || [];
+      const fp = h.fingerprint || null;
+      let fpHtml = "<p class='muted'>No fingerprint record yet. After a scan completes, we store merged evidence (SSDP/UPnP device description, OUI, HTTP title, TLS cert, SSH banner when ports are open).</p>";
+      if (fp && typeof fp === "object") {
+        const sigs = fp.signals || [];
+        const sigLis = sigs.map(function (s) {
+          return "<li><strong>" + esc(s.source) + "</strong>" +
+            (s.field ? " · <span class='muted'>" + esc(s.field) + "</span>" : "") +
+            " — <code>" + esc(s.value || "") + "</code></li>";
+        }).join("");
+        fpHtml = "<dl class='fp-dl'>";
+        if (fp.ladder_max != null && fp.ladder_max !== undefined) {
+          fpHtml += "<dt>Identity ladder</dt><dd>L" + esc(String(fp.ladder_max)) + " (see docs)</dd>";
+        }
+        if (fp.summary) {
+          fpHtml += "<dt>Summary</dt><dd>" + esc(fp.summary) + "</dd>";
+        }
+        if (fp.manufacturer) {
+          fpHtml += "<dt>Manufacturer</dt><dd>" + esc(fp.manufacturer) + "</dd>";
+        }
+        if (fp.model) {
+          fpHtml += "<dt>Model</dt><dd>" + esc(fp.model) + "</dd>";
+        }
+        if (fp.firmware_version) {
+          fpHtml += "<dt>Firmware</dt><dd>" + esc(fp.firmware_version) + "</dd>";
+        }
+        if (fp.serial) {
+          fpHtml += "<dt>Serial</dt><dd>" + esc(fp.serial) + "</dd>";
+        }
+        fpHtml += "</dl>";
+        if (sigLis) {
+          fpHtml += "<p class='muted' style='margin:10px 0 4px 0;'>Evidence chain</p><ul style='margin:0;padding-left:1.2rem;font-size:14px;line-height:1.45;'>" + sigLis + "</ul>";
+        }
+      }
+      let histHtml = "<p class='muted'>No rows yet. History is filled from completed scans (last " + String(10) + " runs retained).</p>";
+      if (hist.length) {
+        histHtml = "<table class='host-detail-table'><thead><tr><th>Scan</th><th>Started</th><th>Ended</th><th>Mode</th><th>CIDR</th><th>Label</th><th>Reach.</th><th>Ports</th></tr></thead><tbody>";
+        for (let i = 0; i < hist.length; i++) {
+          const row = hist[i];
+          const ports = (row.open_ports && row.open_ports.length) ? row.open_ports.join(", ") : "—";
+          histHtml += "<tr><td class='num'>" + esc(String(row.scan_id)) + "</td>" +
+            "<td class='num'>" + fmtDetailTime(row.started_at) + "</td>" +
+            "<td class='num'>" + (row.ended_at ? fmtDetailTime(row.ended_at) : "—") + "</td>" +
+            "<td>" + esc(row.mode || "") + "</td>" +
+            "<td class='num'>" + esc(row.cidr || "") + "</td>" +
+            "<td>" + esc(row.label || "") + "</td>" +
+            "<td>" + esc(row.reachability || "") + "</td>" +
+            "<td class='muted num'>" + esc(ports) + "</td></tr>";
+        }
+        histHtml += "</tbody></table>";
+      }
+      const hintsStr = JSON.stringify(h.raw_hints || {}, null, 2);
+      hostDetailContent.innerHTML =
+        "<section class='host-detail-section'><h3>Address</h3><p style='margin:0;'><code>" + esc(h.ip || "") + "</code></p></section>" +
+        "<section class='host-detail-section'><h3>Current row</h3><p style='margin:0 0 8px 0;'>Reachability <strong>" + esc(h.reachability || "unknown") + "</strong> · Confidence <strong>" + esc(h.confidence || "unknown") + "</strong> · Last seen " +
+        (h.last_seen ? fmtDetailTime(h.last_seen) : "—") + "</p>" +
+        "<p style='margin:0;'>Open ports: <code>" + esc((h.open_ports && h.open_ports.length) ? h.open_ports.join(", ") : "—") + "</code></p></section>" +
+        "<section class='host-detail-section'><h3>Fingerprint reasoning</h3>" + fpHtml + "</section>" +
+        "<section class='host-detail-section'><h3>Passive / discovery hints</h3><pre class='hints-pre'></pre></section>" +
+        "<section class='host-detail-section'><h3>Scan history (snapshots)</h3>" + histHtml + "</section>";
+      const pre = hostDetailContent.querySelector(".hints-pre");
+      if (pre) {
+        pre.textContent = hintsStr;
+      }
+    }
+
+    function closeHostDetail() {
+      hostDetailOverlay.classList.remove("open");
+    }
+
+    async function openHostDetail(ip) {
+      if (!ip) {
+        return;
+      }
+      clearError();
+      hostDetailTitle.textContent = "Device · " + ip;
+      hostDetailContent.innerHTML = "<p class='muted'>Loading…</p>";
+      hostDetailOverlay.classList.add("open");
+      try {
+        const d = await fetchJSON("/api/host?ip=" + encodeURIComponent(ip));
+        renderHostDetail(d);
+      } catch (e) {
+        hostDetailContent.innerHTML = "<p class='muted'>" + esc(e.message) + "</p>";
       }
     }
 
@@ -757,6 +895,42 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     setupContinueBtn.addEventListener("click", () => completeFirstRun().catch((e) => showError(e.message)));
     hideUnknownReach.addEventListener("change", () => renderHosts());
     modeSelect.addEventListener("change", refreshModeHint);
+
+    hostsBody.addEventListener("click", (e) => {
+      const tr = e.target.closest("tr.host-row");
+      if (!tr || !hostsBody.contains(tr)) {
+        return;
+      }
+      const ip = tr.getAttribute("data-ip");
+      if (ip) {
+        openHostDetail(ip).catch((err) => showError(err.message));
+      }
+    });
+    hostsBody.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") {
+        return;
+      }
+      const tr = e.target.closest("tr.host-row");
+      if (!tr || !hostsBody.contains(tr)) {
+        return;
+      }
+      e.preventDefault();
+      const ip = tr.getAttribute("data-ip");
+      if (ip) {
+        openHostDetail(ip).catch((err) => showError(err.message));
+      }
+    });
+    hostDetailClose.addEventListener("click", () => closeHostDetail());
+    hostDetailOverlay.addEventListener("click", (e) => {
+      if (e.target === hostDetailOverlay) {
+        closeHostDetail();
+      }
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && hostDetailOverlay.classList.contains("open")) {
+        closeHostDetail();
+      }
+    });
 
     for (const th of tableHeaders) {
       th.addEventListener("click", () => setSort(th.getAttribute("data-col")));
