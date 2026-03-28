@@ -26,6 +26,7 @@ type Host struct {
 	Confidence   string          `json:"confidence"`
 	LastSeen     time.Time       `json:"last_seen"`
 	RawHints     json.RawMessage `json:"raw_hints,omitempty"`
+	Fingerprint  json.RawMessage `json:"fingerprint,omitempty"`
 }
 
 type ScanRun struct {
@@ -189,8 +190,8 @@ func (s *Store) UpsertHost(ctx context.Context, h Host) error {
 			last_seen = excluded.last_seen,
 			reachability = excluded.reachability,
 			open_ports_json = excluded.open_ports_json,
-			confidence = excluded.confidence,
-			label = excluded.label
+			confidence = CASE WHEN excluded.confidence != 'unknown' THEN excluded.confidence ELSE hosts.confidence END,
+			label = CASE WHEN trim(excluded.label) != '' THEN excluded.label ELSE hosts.label END
 	`,
 		h.IP,
 		h.LastSeen.UTC().Format(time.RFC3339Nano),
@@ -202,9 +203,17 @@ func (s *Store) UpsertHost(ctx context.Context, h Host) error {
 	return err
 }
 
+// UpdateHostIdentity sets label, confidence, and fingerprint_blob after fingerprinting.
+func (s *Store) UpdateHostIdentity(ctx context.Context, ip, label, confidence, fingerprintJSON string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE hosts SET label = ?, confidence = ?, fingerprint_blob = ? WHERE ip = ?`,
+		label, confidence, fingerprintJSON, ip)
+	return err
+}
+
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT ip, reachability, open_ports_json, open_port, label, confidence, last_seen, raw_hints_json
+		SELECT ip, reachability, open_ports_json, open_port, label, confidence, last_seen, raw_hints_json, fingerprint_blob
 		FROM hosts
 		ORDER BY ip ASC
 	`)
@@ -218,8 +227,8 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 		var h Host
 		var portsJSON, legacyOpenPort string
 		var lastSeen string
-		var rawHints sql.NullString
-		if err := rows.Scan(&h.IP, &h.Reachability, &portsJSON, &legacyOpenPort, &h.Label, &h.Confidence, &lastSeen, &rawHints); err != nil {
+		var rawHints, fpBlob sql.NullString
+		if err := rows.Scan(&h.IP, &h.Reachability, &portsJSON, &legacyOpenPort, &h.Label, &h.Confidence, &lastSeen, &rawHints, &fpBlob); err != nil {
 			return nil, err
 		}
 		h.OpenPorts = decodeOpenPortsJSON(portsJSON)
@@ -232,6 +241,9 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 		}
 		if rawHints.Valid && rawHints.String != "" && rawHints.String != "{}" {
 			h.RawHints = json.RawMessage(rawHints.String)
+		}
+		if fpBlob.Valid && fpBlob.String != "" {
+			h.Fingerprint = json.RawMessage(fpBlob.String)
 		}
 		out = append(out, h)
 	}

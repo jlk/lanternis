@@ -1128,6 +1128,12 @@ func (s *Server) watchAndFinalize(dbRunID int64, scanStartedAt time.Time, cidr s
 				return
 			}
 			if !cancelled {
+				s.applyFingerprints(ctx, cidr, hosts)
+				hosts, err = s.store.ListHosts(ctx)
+				if err != nil {
+					s.logger.Printf("scan summary scan_id=%d: list hosts after fingerprint: %v", dbRunID, err)
+					return
+				}
 				if err := s.store.ReplaceScanSnapshot(ctx, dbRunID, cidr, hosts); err != nil {
 					s.logger.Printf("scan snapshot scan_id=%d: %v", dbRunID, err)
 				}
