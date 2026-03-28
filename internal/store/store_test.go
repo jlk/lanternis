@@ -2,9 +2,66 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
+
+func TestMergeHostHints(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := mustTestStore(t, ctx)
+	defer cleanup()
+
+	ip := "10.0.0.7"
+	patch1 := map[string]any{
+		"arp": map[string]any{"mac": "aa:bb:cc:dd:ee:01", "source": "linux_proc"},
+	}
+	if err := st.MergeHostHints(ctx, ip, patch1); err != nil {
+		t.Fatalf("MergeHostHints first: %v", err)
+	}
+	patch2 := map[string]any{
+		"arp": map[string]any{"mac": "aa:bb:cc:dd:ee:02"},
+	}
+	if err := st.MergeHostHints(ctx, ip, patch2); err != nil {
+		t.Fatalf("MergeHostHints second: %v", err)
+	}
+	hosts, err := st.ListHosts(ctx)
+	if err != nil {
+		t.Fatalf("ListHosts: %v", err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	var m map[string]any
+	if err := json.Unmarshal(hosts[0].RawHints, &m); err != nil {
+		t.Fatalf("unmarshal raw_hints: %v", err)
+	}
+	arp, _ := m["arp"].(map[string]any)
+	if arp == nil {
+		t.Fatal("expected arp object in raw_hints")
+	}
+	if arp["mac"] != "aa:bb:cc:dd:ee:02" {
+		t.Fatalf("expected merged mac, got %v", arp["mac"])
+	}
+	if arp["source"] != "linux_proc" {
+		t.Fatalf("expected nested merge to keep source, got %v", arp["source"])
+	}
+
+	// UpsertHost must not wipe hints.
+	now := time.Now().UTC()
+	if err := st.UpsertHost(ctx, Host{
+		IP: ip, Reachability: "reachable", Label: "x", Confidence: "high", LastSeen: now,
+	}); err != nil {
+		t.Fatalf("UpsertHost: %v", err)
+	}
+	hosts2, err := st.ListHosts(ctx)
+	if err != nil {
+		t.Fatalf("ListHosts after upsert: %v", err)
+	}
+	if len(hosts2) != 1 || len(hosts2[0].RawHints) == 0 {
+		t.Fatalf("expected raw_hints preserved after UpsertHost, got %+v", hosts2)
+	}
+}
 
 func TestStoreUpsertAndListHosts(t *testing.T) {
 	ctx := context.Background()

@@ -15,6 +15,7 @@ import (
 
 	"github.com/jlk/lanternis/internal/audit"
 	"github.com/jlk/lanternis/internal/discovery"
+	"github.com/jlk/lanternis/internal/discovery/passive"
 	"github.com/jlk/lanternis/internal/store"
 )
 
@@ -140,6 +141,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
           </select>
         </label>
         <span id="statusText" class="status muted" aria-live="polite">Status: idle</span>
+        <span id="probeBadge" class="muted" style="margin-left:8px;" aria-live="polite"></span>
       </div>
       <p id="modeHint" class="muted" style="margin: 10px 0 0 0; font-size: 14px; line-height: 1.45;"></p>
     </section>
@@ -151,6 +153,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         <li><strong>normal</strong> — Default balance (32). Good starting point for most home /24 networks.</li>
         <li><strong>thorough</strong> — Most parallel probes (48). Finishes sooner; more CPU and traffic.</li>
         <li><strong>Reachability</strong> — What we could infer from the active probe (e.g. TCP connect or ICMP). <strong>Unknown</strong> often means “no reply to our probe,” not “offline for sure.” Hidden rows may still be interesting later (M1a fingerprints, etc.).</li>
+        <li><strong>Hints</strong> — Passive clues merged from this machine (e.g. ARP MAC addresses on Linux/macOS when you start a scan). They do not replace reachability from probes.</li>
       </ul>
     </details>
 
@@ -168,6 +171,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
             <th data-col="label" role="button" tabindex="0" title="Sort by label">Label</th>
             <th data-col="confidence" role="button" tabindex="0" title="Sort by confidence">Confidence</th>
             <th data-col="last_seen" role="button" tabindex="0" title="Sort by last seen">Last seen</th>
+            <th data-col="hints" role="button" tabindex="0" title="Sort by passive hints">Hints</th>
           </tr>
         </thead>
         <tbody id="hostsBody"></tbody>
@@ -194,6 +198,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const hideUnknownReach = document.getElementById("hideUnknownReach");
     const hostCount = document.getElementById("hostCount");
     const modeHint = document.getElementById("modeHint");
+    const probeBadge = document.getElementById("probeBadge");
 
     let currentHosts = [];
     let sort = { col: "ip", dir: "asc" };
@@ -246,12 +251,15 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       if (mode === "tcp_fallback") {
         probeBox.style.display = "block";
         probeBox.textContent = "Probe mode: TCP fallback. " + guidance;
+        probeBadge.textContent = "[Active probe: TCP]";
       } else if (mode === "icmp_echo") {
         probeBox.style.display = "block";
         probeBox.textContent = "Probe mode: ICMP echo. " + guidance;
+        probeBadge.textContent = "[Active probe: ICMP]";
       } else {
         probeBox.style.display = "block";
         probeBox.textContent = "Probe mode: unknown.";
+        probeBadge.textContent = "";
       }
     }
 
@@ -343,6 +351,16 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       return String(h.reachability || "unknown").toLowerCase() === "unknown";
     }
 
+    function hintSummary(h) {
+      try {
+        const rh = h.raw_hints;
+        if (!rh || typeof rh !== "object") return "";
+        const arp = rh.arp;
+        if (arp && arp.mac) return "ARP · " + String(arp.mac);
+      } catch (e) {}
+      return "";
+    }
+
     function sortedHosts() {
       const rows = (currentHosts || []).slice();
       rows.sort((a, b) => {
@@ -355,6 +373,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         }
         if (sort.col === "confidence") return dir * (rankConfidence(a.confidence) - rankConfidence(b.confidence));
         if (sort.col === "reachability") return dir * (rankReachability(a.reachability) - rankReachability(b.reachability));
+        if (sort.col === "hints") return dir * hintSummary(a).localeCompare(hintSummary(b));
         const av = String((a[sort.col] ?? "")).toLowerCase();
         const bv = String((b[sort.col] ?? "")).toLowerCase();
         return dir * av.localeCompare(bv);
@@ -379,14 +398,14 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       hostsBody.innerHTML = "";
       if (!total) {
         hostCount.textContent = "";
-        hostsBody.innerHTML = "<tr><td colspan='5' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
+        hostsBody.innerHTML = "<tr><td colspan='6' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
         return;
       }
       if (!rows.length) {
         if (hideUnknownReach.checked && hiddenUnknown > 0) {
-          hostsBody.innerHTML = "<tr><td colspan='5' class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
+          hostsBody.innerHTML = "<tr><td colspan='6' class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
         } else {
-          hostsBody.innerHTML = "<tr><td colspan='5' class='muted'>No rows to show.</td></tr>";
+          hostsBody.innerHTML = "<tr><td colspan='6' class='muted'>No rows to show.</td></tr>";
         }
         hostCount.textContent = "Showing 0 of " + total + (hiddenUnknown ? " (" + hiddenUnknown + " hidden)" : "");
         return;
@@ -399,7 +418,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
           "<td>" + (h.reachability || "unknown") + "</td>" +
           "<td>" + (h.label || "Unknown") + "</td>" +
           "<td>" + (h.confidence || "unknown") + "</td>" +
-          "<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>";
+          "<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>" +
+          "<td class='muted'>" + hintSummary(h) + "</td>";
         hostsBody.appendChild(tr);
       }
     }
@@ -661,6 +681,17 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+
+	go func(cidr string) {
+		n, err := passive.ApplyARPHints(context.Background(), s.store, cidr)
+		if err != nil {
+			s.logger.Printf("passive ARP hints: %v", err)
+			return
+		}
+		if n > 0 {
+			s.logger.Printf("passive ARP hints: merged %d entries for %s", n, cidr)
+		}
+	}(req.CIDR)
 
 	dbRunID, err := s.store.InsertScanRun(r.Context(), req.Mode)
 	if err != nil {

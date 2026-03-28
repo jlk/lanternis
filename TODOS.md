@@ -6,7 +6,7 @@ Deferred from **CEO selective-expansion** review (**2026-03-22**). See `~/.gstac
 
 - **ICMP / raw-socket spike** — Document macOS/Linux/Windows permission model; link from `docs/ENGINEERING-PLAN.md` checklist.
 - **CI follow-up** — Extend GitHub Actions beyond baseline `go test ./...` (e.g., linting, race detector, and optional integration-tag job).
-- **First-run trust wizard** — **Done (M1):** localhost modal + `app_kv` + `/api/setup/*`; **still deferred:** optional NVD API key field, richer retention copy.
+- **First-run trust wizard** — **Done (M1):** localhost modal + `app_kv` + `/api/setup/`*; **still deferred:** optional NVD API key field, richer retention copy.
 - **Redacted support export** — One-click bundle for GitHub issues: versions, capability flags, inventory summary, error codes; **no** secrets; optional opt-in for extra diagnostics.
 
 ## P3 — M2 / pain-driven

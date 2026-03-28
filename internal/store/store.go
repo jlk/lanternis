@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -15,11 +16,12 @@ type Store struct {
 }
 
 type Host struct {
-	IP           string    `json:"ip"`
-	Reachability string    `json:"reachability"`
-	Label        string    `json:"label"`
-	Confidence   string    `json:"confidence"`
-	LastSeen     time.Time `json:"last_seen"`
+	IP           string          `json:"ip"`
+	Reachability string          `json:"reachability"`
+	Label        string          `json:"label"`
+	Confidence   string          `json:"confidence"`
+	LastSeen     time.Time       `json:"last_seen"`
+	RawHints     json.RawMessage `json:"raw_hints,omitempty"`
 }
 
 type ScanRun struct {
@@ -139,7 +141,7 @@ func (s *Store) UpsertHost(ctx context.Context, h Host) error {
 
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT ip, reachability, label, confidence, last_seen
+		SELECT ip, reachability, label, confidence, last_seen, raw_hints_json
 		FROM hosts
 		ORDER BY ip ASC
 	`)
@@ -152,11 +154,15 @@ func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	for rows.Next() {
 		var h Host
 		var lastSeen string
-		if err := rows.Scan(&h.IP, &h.Reachability, &h.Label, &h.Confidence, &lastSeen); err != nil {
+		var rawHints sql.NullString
+		if err := rows.Scan(&h.IP, &h.Reachability, &h.Label, &h.Confidence, &lastSeen, &rawHints); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse(time.RFC3339Nano, lastSeen); err == nil {
 			h.LastSeen = t
+		}
+		if rawHints.Valid && rawHints.String != "" && rawHints.String != "{}" {
+			h.RawHints = json.RawMessage(rawHints.String)
 		}
 		out = append(out, h)
 	}
