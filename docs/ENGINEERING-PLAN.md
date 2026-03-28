@@ -192,7 +192,7 @@ Invalid: `start` while `running` without **cancel** or **queue** — **recommend
 - [ ] CSRF on mutating routes  
 - [ ] `go test ./...` passes without network  
 - [ ] Design doc `evidence[]` rule reflected in any future LLM handler  
-- [ ] ICMP permissions documented (`docs/ICMP.md`) and real ICMP probe available behind `-tags=integration`
+- [x] ICMP permissions documented (`docs/ICMP.md`, OS matrix + Windows) and real ICMP probe available behind `-tags=integration`
 
 ---
 

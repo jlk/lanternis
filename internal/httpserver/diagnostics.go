@@ -92,9 +92,42 @@ func (s *Server) handleAbout(w http.ResponseWriter, _ *http.Request) {
     <p><a href="/">← Back to scanner</a></p>
     <h1>Diagnostics</h1>
     <p class="muted">Read-only snapshot for troubleshooting. Same payload as <code>GET /api/diagnostics</code>.</p>
+    <p><button type="button" id="supportExportBtn">Download redacted support bundle (JSON)</button> <span id="supportExportMsg" class="muted"></span></p>
+    <p class="muted" style="font-size:14px;">The bundle includes versions, probe mode, scan/inventory <strong>counts</strong>, and audit <strong>event types</strong> — not full paths, audit payloads, or per-host IPs.</p>
     <pre id="diag">Loading…</pre>
   </main>
   <script>
+    async function downloadSupportBundle() {
+      const msg = document.getElementById("supportExportMsg");
+      msg.textContent = "";
+      try {
+        const csrf = await fetch("/api/csrf").then((r) => r.json());
+        const token = csrf.csrf_token || "";
+        const res = await fetch("/api/support/export", {
+          method: "POST",
+          headers: { "X-CSRF-Token": token, "Content-Type": "application/json" },
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || ("HTTP " + res.status));
+        }
+        const blob = await res.blob();
+        const cd = res.headers.get("Content-Disposition") || "";
+        let name = "lanternis-support.json";
+        const m = /filename="([^"]+)"/.exec(cd);
+        if (m) name = m[1];
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        msg.textContent = "Download started.";
+      } catch (e) {
+        msg.textContent = "Error: " + e.message;
+      }
+    }
+    document.getElementById("supportExportBtn").addEventListener("click", downloadSupportBundle);
     fetch("/api/diagnostics")
       .then((r) => r.json())
       .then((data) => {

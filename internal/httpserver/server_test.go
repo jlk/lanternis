@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -230,6 +231,46 @@ func TestDiagnosticsEndpoint(t *testing.T) {
 	}
 }
 
+func TestSupportExportRequiresCSRF(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/support/export", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+func TestSupportExportWithCSRF(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token, cookie := csrfTokenAndCookie(t, srv)
+	req := httptest.NewRequest(http.MethodPost, "/api/support/export", nil)
+	req.Header.Set("X-CSRF-Token", token)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Disposition"); !strings.Contains(got, "attachment") {
+		t.Fatalf("expected Content-Disposition attachment, got %q", got)
+	}
+	var bundle map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &bundle); err != nil {
+		t.Fatalf("decode bundle: %v", err)
+	}
+	if bundle["export_schema_version"] == nil {
+		t.Fatalf("missing export_schema_version: %+v", bundle)
+	}
+	paths, _ := bundle["paths"].(map[string]any)
+	if paths == nil || paths["db_filename"] == nil {
+		t.Fatalf("expected paths.db_filename, got %+v", bundle)
+	}
+	if bundle["db_path"] != nil {
+		t.Fatal("bundle should not include raw db_path")
+	}
+}
+
 func TestAboutPageServesHTML(t *testing.T) {
 	srv, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/about", nil)
@@ -238,8 +279,12 @@ func TestAboutPageServesHTML(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte("/api/diagnostics")) {
+	b := rec.Body.Bytes()
+	if !bytes.Contains(b, []byte("/api/diagnostics")) {
 		t.Fatal("about page should reference diagnostics API")
+	}
+	if !bytes.Contains(b, []byte("/api/support/export")) {
+		t.Fatal("about page should reference support export")
 	}
 }
 

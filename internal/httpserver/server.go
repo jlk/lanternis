@@ -83,6 +83,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/scan/status", s.handleScanStatus)
 	s.mux.HandleFunc("/api/scan/start", s.requireCSRF(s.handleScanStart))
 	s.mux.HandleFunc("/api/scan/cancel", s.requireCSRF(s.handleScanCancel))
+	s.mux.HandleFunc("/api/support/export", s.requireCSRF(s.handleSupportExport))
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {

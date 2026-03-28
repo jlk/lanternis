@@ -4,10 +4,10 @@ Deferred from **CEO selective-expansion** review (**2026-03-22**). See `~/.gstac
 
 ## P2 — Soon after M1
 
-- **ICMP / raw-socket spike** — Document macOS/Linux/Windows permission model; link from `docs/ENGINEERING-PLAN.md` checklist.
+- **ICMP / raw-socket spike** — **Done:** `docs/ICMP.md` OS matrix (macOS/Linux/Windows/WSL), examples, `ENGINEERING-PLAN.md` checklist ticked.
 - **CI follow-up** — **Done:** `.github/workflows/ci.yml` runs `go test`, `go vet`, `gofmt` check, `go test -race`, and `go test -tags=integration` in parallel jobs.
 - **First-run trust wizard** — **Done (M1):** localhost modal + `app_kv` + `/api/setup/`*; **still deferred:** optional NVD API key field, richer retention copy.
-- **Redacted support export** — One-click bundle for GitHub issues: versions, capability flags, inventory summary, error codes; **no** secrets; optional opt-in for extra diagnostics.
+- **Redacted support export** — **Done:** `POST /api/support/export` (CSRF) downloads JSON; About page button. Includes versions, probe mode, inventory **counts**, audit **types** (no full paths, payloads, or per-host IPs).
 
 ## P3 — M2 / pain-driven
 
