@@ -149,6 +149,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     .host-detail-card .hdr { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
     .host-detail-section { margin-bottom: 16px; }
     .host-detail-section h3 { margin: 0 0 8px 0; font-size: 15px; font-weight: 600; }
+    .open-ports-list .port-chip { display: inline-block; padding: 3px 9px; margin: 0 6px 6px 0; font-size: 13px; border-radius: 4px; border: 1px solid var(--ln-border); background: color-mix(in srgb, var(--ln-accent) 6%, transparent); }
+    .web-ui-links a { font-weight: 500; }
     .fp-dl { display: grid; grid-template-columns: 9rem 1fr; gap: 4px 12px; font-size: 14px; margin: 0; }
     .fp-dl dt { color: var(--ln-muted); margin: 0; }
     .fp-dl dd { margin: 0; }
@@ -584,12 +586,38 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         .replace(/"/g, "&quot;");
     }
 
+    /** Host part for URL authority (bracket IPv6 literals). */
+    function ipHostForURL(ip) {
+      if (!ip || typeof ip !== "string") {
+        return "";
+      }
+      if (ip.indexOf(":") !== -1) {
+        return "[" + ip + "]";
+      }
+      return ip;
+    }
+
     function fmtDetailTime(iso) {
       try {
         return new Date(iso).toLocaleString();
       } catch (e) {
         return String(iso);
       }
+    }
+
+    function sortDetailPorts(a, b) {
+      if (a === "icmp" && b !== "icmp") {
+        return 1;
+      }
+      if (b === "icmp" && a !== "icmp") {
+        return -1;
+      }
+      const na = parseInt(a, 10);
+      const nb = parseInt(b, 10);
+      if (!isNaN(na) && !isNaN(nb) && String(na) === a && String(nb) === b) {
+        return na - nb;
+      }
+      return String(a).localeCompare(String(b));
     }
 
     function vendorSubtitle(fp) {
@@ -675,13 +703,42 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       const kindLine = kindRow
         ? "<strong>" + esc(kindRow) + "</strong> <span class='muted'>(heuristic)</span>"
         : "<span class='muted'>—</span>";
+      const portList = (h.open_ports && h.open_ports.length)
+        ? h.open_ports.slice().map(function (p) { return String(p); }).sort(sortDetailPorts)
+        : [];
+      const portsBlock = portList.length
+        ? "<p class='open-ports-list' style='margin:0;line-height:1.6;'>" + portList.map(function (p) {
+          return "<code class='port-chip'>" + esc(p) + "</code>";
+        }).join(" ") + "</p>"
+        : "<p class='muted' style='margin:0;'>No TCP ports from the last probe in this scan mode (or host did not respond to probes).</p>";
+      const urlHost = ipHostForURL(h.ip || "");
+      const portSet = {};
+      for (let i = 0; i < portList.length; i++) {
+        portSet[String(portList[i]).trim()] = true;
+      }
+      const webParts = [];
+      if (urlHost) {
+        if (portSet["80"]) {
+          webParts.push("<a class=\"web-ui-link\" href=\"" + esc("http://" + urlHost + "/") + "\" target=\"_blank\" rel=\"noopener noreferrer\">HTTP <span class='muted'>(80)</span></a>");
+        }
+        if (portSet["443"]) {
+          webParts.push("<a class=\"web-ui-link\" href=\"" + esc("https://" + urlHost + "/") + "\" target=\"_blank\" rel=\"noopener noreferrer\">HTTPS <span class='muted'>(443)</span></a>");
+        }
+      }
+      const webLinksBlock = webParts.length
+        ? "<p class='web-ui-links' style='margin:10px 0 0 0;font-size:14px;'>Web UI: " + webParts.join(" · ") + " <span class='muted' style='font-size:12px;'>(opens in a new tab; certificate warnings are normal on LAN)</span></p>"
+        : "";
       hostDetailContent.innerHTML =
         "<section class='host-detail-section'><h3>Address</h3><p style='margin:0;'><code>" + esc(h.ip || "") + "</code></p></section>" +
+        "<section class='host-detail-section'><h3>Open ports</h3>" +
+        "<p class='muted' style='margin:0 0 10px 0;font-size:13px;'>Ports that accepted a TCP connect (or <code>icmp</code> when echo was seen) in the current probe mode — not a full port map.</p>" +
+        portsBlock +
+        webLinksBlock +
+        "</section>" +
         "<section class='host-detail-section'><h3>Current row</h3><p style='margin:0 0 8px 0;'>Kind " + kindLine + "</p>" +
         "<p style='margin:0 0 8px 0;'>Vendor " + vendorLine + "</p>" +
-        "<p style='margin:0 0 8px 0;'>Reachability <strong>" + esc(h.reachability || "unknown") + "</strong> · Confidence <strong>" + esc(h.confidence || "unknown") + "</strong> · Last seen " +
-        (h.last_seen ? fmtDetailTime(h.last_seen) : "—") + "</p>" +
-        "<p style='margin:0;'>Open ports: <code>" + esc((h.open_ports && h.open_ports.length) ? h.open_ports.join(", ") : "—") + "</code></p></section>" +
+        "<p style='margin:0;'>Reachability <strong>" + esc(h.reachability || "unknown") + "</strong> · Confidence <strong>" + esc(h.confidence || "unknown") + "</strong> · Last seen " +
+        (h.last_seen ? fmtDetailTime(h.last_seen) : "—") + "</p></section>" +
         "<section class='host-detail-section'><h3>Fingerprint reasoning</h3>" + fpHtml + "</section>" +
         "<section class='host-detail-section'><h3>Passive / discovery hints</h3><pre class='hints-pre'></pre></section>" +
         "<section class='host-detail-section'><h3>Scan history (snapshots)</h3>" + histHtml + "</section>";
