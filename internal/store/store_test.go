@@ -268,6 +268,48 @@ func TestListRecentScanRuns(t *testing.T) {
 	}
 }
 
+func TestReplaceHostFindingsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := mustTestStore(t, ctx)
+	defer cleanup()
+
+	ip := "192.168.0.44"
+	if err := st.UpsertHost(ctx, Host{
+		IP: ip, Reachability: "reachable", Label: "x", Confidence: "low",
+		LastSeen: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f1 := Finding{
+		Surface: "upnp/device", VendorGuess: "V", ProductGuess: "P", VersionGuess: "1",
+		VersionConfidence: "high", EvidenceKind: "upnp_device_xml", EvidenceDigest: "abc",
+		VulnReady: true,
+	}
+	if err := st.ReplaceHostFindings(ctx, ip, []Finding{f1}); err != nil {
+		t.Fatalf("ReplaceHostFindings: %v", err)
+	}
+	list, err := st.ListFindingsByHost(ctx, ip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(list))
+	}
+	if list[0].Surface != "upnp/device" || !list[0].VulnReady || list[0].ID == 0 {
+		t.Fatalf("bad row: %+v", list[0])
+	}
+	if err := st.ReplaceHostFindings(ctx, ip, nil); err != nil {
+		t.Fatal(err)
+	}
+	list2, err := st.ListFindingsByHost(ctx, ip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list2) != 0 {
+		t.Fatalf("expected cleared, got %d", len(list2))
+	}
+}
+
 func TestNVDAPIKeyConfigured(t *testing.T) {
 	ctx := context.Background()
 	st, cleanup := mustTestStore(t, ctx)

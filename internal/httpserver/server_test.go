@@ -401,10 +401,17 @@ func TestHostDetailAPI(t *testing.T) {
 			store.Host
 			Vendor string `json:"vendor"`
 		} `json:"host"`
+		Findings    []store.Finding              `json:"findings"`
 		ScanHistory []store.HostScanHistoryEntry `json:"scan_history"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
+	}
+	if out.Findings == nil {
+		t.Fatal("expected findings key present (may be empty slice)")
+	}
+	if len(out.Findings) != 0 {
+		t.Fatalf("expected no findings, got %d", len(out.Findings))
 	}
 	if out.Host.IP != "10.0.0.5" || out.Host.Label != "Unit" {
 		t.Fatalf("host: %+v", out.Host)

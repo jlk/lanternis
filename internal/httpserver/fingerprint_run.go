@@ -45,12 +45,14 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 				}
 				conf := fingerprint.ConfidenceFor(rec)
 				_ = s.store.UpdateHostIdentity(ctx, h.IP, label, conf, js)
+				_ = s.store.ReplaceHostFindings(ctx, h.IP, fingerprint.FindingsFromRecord(rec))
 				return
 			}
 			// Build returned nil (no fingerprint signals yet); still apply mDNS/PTR-style names from hints.
 			if strings.TrimSpace(label) != "" {
 				_ = s.store.UpdateHostLabel(ctx, h.IP, label)
 			}
+			_ = s.store.ReplaceHostFindings(ctx, h.IP, nil)
 		}()
 	}
 	wg.Wait()

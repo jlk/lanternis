@@ -846,6 +846,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     function renderHostDetail(d) {
       const h = d.host;
       const hist = d.scan_history || [];
+      const findings = d.findings || [];
       const fp = h.fingerprint || null;
       const vendorDisp = String(h.vendor || "").trim();
       let fpHtml = "<p class='muted'>No fingerprint record yet. After a scan completes, we store merged evidence: passive ARP / SSDP / mDNS, reverse DNS (PTR), UPnP device XML when available, OUI, HTTP(S) title and Server headers, TLS cert names, SSH banners, and (when ports are open) anonymous SMB strings and an RDP negotiation peek. <strong>Deep</strong> scan mode on Linux may add a raw SYN/SYN+ACK TCP fingerprint if the process has permission — not SNMP.</p>";
@@ -952,6 +953,21 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       const webLinksBlock = webParts.length
         ? "<p class='web-ui-links' style='margin:10px 0 0 0;font-size:14px;'>Web UI: " + webParts.join(" · ") + " <span class='muted' style='font-size:12px;'>(opens in a new tab; certificate warnings are normal on LAN)</span></p>"
         : "";
+      let findingsHtml = "<p class='muted' style='margin:0;'>No structured version findings yet. After a scan, vendor/product/version hints tied to a surface (UPnP, SSH, …) appear here. CVE lookup uses only rows marked vuln-ready.</p>";
+      if (findings.length) {
+        findingsHtml = "<table class='host-detail-table'><thead><tr><th>Surface</th><th>Product</th><th>Version</th><th>Confidence</th><th>Evidence</th></tr></thead><tbody>";
+        for (let fi = 0; fi < findings.length; fi++) {
+          const f = findings[fi];
+          const prod = [f.vendor_guess, f.product_guess].filter(function (x) { return x && String(x).trim(); }).join(" · ") || "—";
+          const ev = (f.evidence_kind || "") + (f.evidence_digest ? " · " + String(f.evidence_digest).slice(0, 12) + "…" : "");
+          findingsHtml += "<tr><td class='muted'>" + esc(f.surface || "") + "</td>" +
+            "<td>" + esc(prod) + "</td>" +
+            "<td class='num'>" + esc(f.version_guess || "—") + "</td>" +
+            "<td>" + esc(f.version_confidence || "") + (f.vuln_ready ? " <span class='muted'>(vuln-ready)</span>" : "") + "</td>" +
+            "<td class='muted' style='font-size:13px;max-width:14rem;word-break:break-all;'>" + esc(ev || "—") + "</td></tr>";
+        }
+        findingsHtml += "</tbody></table>";
+      }
       hostDetailContent.innerHTML =
         "<section class='host-detail-section'><h3>Address</h3><p style='margin:0;'><code>" + esc(h.ip || "") + "</code></p></section>" +
         "<section class='host-detail-section'><h3>Open ports</h3>" +
@@ -963,6 +979,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         "<p style='margin:0 0 8px 0;'>Vendor " + vendorLine + "</p>" +
         "<p style='margin:0;'>Reachability <strong>" + esc(h.reachability || "unknown") + "</strong> · Confidence <strong>" + esc(h.confidence || "unknown") + "</strong> · Last seen " +
         (h.last_seen ? fmtDetailTime(h.last_seen) : "—") + "</p></section>" +
+        "<section class='host-detail-section'><h3>Findings</h3><p class='muted' style='margin:0 0 10px 0;font-size:13px;'>Per-surface software identity for vulnerability-oriented review (not the same as display label).</p>" +
+        findingsHtml + "</section>" +
         "<section class='host-detail-section'><h3>Fingerprint reasoning</h3>" + fpHtml + "</section>" +
         "<section class='host-detail-section'><h3>Passive / discovery hints</h3><pre class='hints-pre'></pre></section>" +
         "<section class='host-detail-section'><h3>Scan history (snapshots)</h3>" + histHtml + "</section>";

@@ -54,8 +54,14 @@ func (s *Server) handleHostDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	findings, err := s.store.ListFindingsByHost(r.Context(), ip)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"host":         newHostJSON(*host),
+		"findings":     findings,
 		"scan_history": hist,
 	})
 }

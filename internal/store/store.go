@@ -110,7 +110,10 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureScanRunsCIDRColumn(ctx); err != nil {
 		return err
 	}
-	return s.ensureScanHostSnapshotsTable(ctx)
+	if err := s.ensureScanHostSnapshotsTable(ctx); err != nil {
+		return err
+	}
+	return s.ensureHostFindingsTable(ctx)
 }
 
 func (s *Store) ensureHostsOpenPortColumn(ctx context.Context) error {
