@@ -17,6 +17,7 @@ var (
 
 	tcpPortsNormalExtra = []string{
 		"8443", "554", "5000", "8888",
+		"3389", // RDP (Windows Remote Desktop)
 	}
 
 	// Extra ports for thorough: remote admin, file share, MQTT, printing, HomeKit, discovery, media, HA.
