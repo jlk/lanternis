@@ -55,8 +55,18 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 					}
 					if key != "" {
 						enrichCtx, cancel := context.WithTimeout(ctx, 13*time.Second)
-						_ = webenrich.EnrichRecord(enrichCtx, rec, hints, prov, key)
+						nBefore := webLLMInferenceCount(rec)
+						err := webenrich.EnrichRecord(enrichCtx, rec, hints, prov, key)
 						cancel()
+						if s.debug {
+							if err != nil {
+								s.debugf("web enrich ip=%s provider=%s: %v", h.IP, prov, err)
+							} else if webLLMInferenceCount(rec) > nBefore {
+								s.debugf("web enrich ip=%s provider=%s: added web_llm name hint", h.IP, prov)
+							} else {
+								s.debugf("web enrich ip=%s provider=%s: no hint (not enough name text, model empty reply, or parse miss)", h.IP, prov)
+							}
+						}
 					}
 				}
 				js, err := fingerprint.RecordJSON(rec)
@@ -76,4 +86,17 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 		}()
 	}
 	wg.Wait()
+}
+
+func webLLMInferenceCount(rec *fingerprint.Record) int {
+	if rec == nil {
+		return 0
+	}
+	n := 0
+	for _, inf := range rec.Inferences {
+		if inf.Source == "web_llm" {
+			n++
+		}
+	}
+	return n
 }
