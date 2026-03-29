@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/jlk/lanternis/internal/discovery/passive"
@@ -36,8 +37,8 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 			if err != nil {
 				return
 			}
-			label := rec.Summary
-			if label == "" {
+			label := fingerprint.DisplayLabel(rec, hints, h.IP)
+			if strings.TrimSpace(label) == "" {
 				label = h.Label
 			}
 			conf := fingerprint.ConfidenceFor(rec)
