@@ -830,6 +830,11 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         if (fp.firmware_version) {
           fpHtml += "<dt>Firmware</dt><dd>" + esc(fp.firmware_version) + "</dd>";
         }
+        if (fp.os_family || fp.os_detail) {
+          var osDisp = (fp.os_detail && String(fp.os_detail).trim()) || String(fp.os_family || "");
+          fpHtml += "<dt>OS (inferred)</dt><dd>" + esc(osDisp) +
+            " <span class='muted'>(SSH / HTTP Server / SSDP; best-effort)</span></dd>";
+        }
         if (fp.serial) {
           fpHtml += "<dt>Serial</dt><dd>" + esc(fp.serial) + "</dd>";
         }

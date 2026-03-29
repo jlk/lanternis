@@ -269,6 +269,8 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 
+	ApplyOSInference(rec, hints, pctx)
+
 	ClassifyDevice(rec, h, hints, pctx)
 
 	rec.Summary = summarize(rec)
