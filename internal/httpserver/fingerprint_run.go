@@ -4,10 +4,12 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jlk/lanternis/internal/discovery/passive"
 	"github.com/jlk/lanternis/internal/fingerprint"
 	"github.com/jlk/lanternis/internal/store"
+	"github.com/jlk/lanternis/internal/webenrich"
 )
 
 // applyFingerprints runs L1–L4 fingerprinting for hosts inside cidr (parallel, bounded).
@@ -42,6 +44,21 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 				label = strings.TrimSpace(h.Label)
 			}
 			if rec != nil {
+				if on, _ := s.store.WebEnrichmentEnabled(ctx); on {
+					prov, _ := s.store.WebEnrichmentProvider(ctx)
+					var key string
+					switch prov {
+					case "anthropic":
+						key, _ = s.store.AnthropicAPIKey(ctx)
+					default:
+						key, _ = s.store.OpenAIAPIKey(ctx)
+					}
+					if key != "" {
+						enrichCtx, cancel := context.WithTimeout(ctx, 13*time.Second)
+						_ = webenrich.EnrichRecord(enrichCtx, rec, hints, prov, key)
+						cancel()
+					}
+				}
 				js, err := fingerprint.RecordJSON(rec)
 				if err != nil {
 					return

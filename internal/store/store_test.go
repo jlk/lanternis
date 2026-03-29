@@ -268,6 +268,60 @@ func TestListRecentScanRuns(t *testing.T) {
 	}
 }
 
+func TestWebEnrichmentSettings(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := mustTestStore(t, ctx)
+	defer cleanup()
+	en, err := st.WebEnrichmentEnabled(ctx)
+	if err != nil || en {
+		t.Fatalf("default enabled=%v err=%v", en, err)
+	}
+	p, _ := st.WebEnrichmentProvider(ctx)
+	if p != "openai" {
+		t.Fatalf("default provider %q", p)
+	}
+	if err := st.SetWebEnrichment(ctx, WebEnrichmentUpdate{
+		Enabled:   true,
+		Provider:  "openai",
+		OpenAIKey: "sk-test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	en, _ = st.WebEnrichmentEnabled(ctx)
+	if !en {
+		t.Fatal("expected enabled")
+	}
+	k, err := st.OpenAIAPIKey(ctx)
+	if err != nil || k != "sk-test" {
+		t.Fatalf("key %q err %v", k, err)
+	}
+	if err := st.SetWebEnrichment(ctx, WebEnrichmentUpdate{
+		Enabled:        false,
+		ClearOpenAIKey: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ok, _ := st.OpenAIAPIKeyConfigured(ctx)
+	if ok {
+		t.Fatal("expected key cleared")
+	}
+	if err := st.SetWebEnrichment(ctx, WebEnrichmentUpdate{
+		Enabled:      true,
+		Provider:     "anthropic",
+		AnthropicKey: "sk-ant-test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = st.WebEnrichmentProvider(ctx)
+	if p != "anthropic" {
+		t.Fatalf("provider %q", p)
+	}
+	ak, err := st.AnthropicAPIKey(ctx)
+	if err != nil || ak != "sk-ant-test" {
+		t.Fatalf("anthropic key %q err %v", ak, err)
+	}
+}
+
 func TestReplaceHostFindingsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	st, cleanup := mustTestStore(t, ctx)

@@ -47,6 +47,22 @@ func (s *Server) buildSupportBundle(ctx context.Context) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
+	webEnrich, err := s.store.WebEnrichmentEnabled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	openAIConfigured, err := s.store.OpenAIAPIKeyConfigured(ctx)
+	if err != nil {
+		return nil, err
+	}
+	webProv, err := s.store.WebEnrichmentProvider(ctx)
+	if err != nil {
+		return nil, err
+	}
+	anthropicConfigured, err := s.store.AnthropicAPIKeyConfigured(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	byReach := map[string]int{}
 	hintsRows := 0
@@ -110,9 +126,13 @@ func (s *Server) buildSupportBundle(ctx context.Context) (map[string]any, error)
 			"db_filename": dbName,
 		},
 		"setup": map[string]any{
-			"first_run_complete":     firstDone,
-			"suggested_cidr":         suggested,
-			"nvd_api_key_configured": nvdOK,
+			"first_run_complete":             firstDone,
+			"suggested_cidr":                 suggested,
+			"nvd_api_key_configured":         nvdOK,
+			"web_enrichment_enabled":         webEnrich,
+			"web_enrichment_provider":        webProv,
+			"openai_api_key_configured":      openAIConfigured,
+			"anthropic_api_key_configured":   anthropicConfigured,
 		},
 		"scan_status": s.scanner.Status(),
 		"concurrency_modes": map[string]int{

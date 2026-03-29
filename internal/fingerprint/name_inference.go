@@ -3,17 +3,16 @@ package fingerprint
 // NameInference is a hypothesis about device identity from names or user rules—not protocol-verified L4 fact.
 // Stored in hosts.fingerprint_blob alongside signals (see FINGERPRINT-PLAN.md L5-adjacent hints).
 //
-// Web search / LLM enrichment is intentionally out of scope for the default product (privacy, trust).
-// A future opt-in mode could add source "web_lookup" with rate limits, explicit consent in setup,
-// and UI copy that third parties receive queried strings—see product plan; not implemented here.
+// Optional internet-assisted hints use source "web_llm" only when enabled in Diagnostics with a
+// user-supplied API key (OpenAI or Anthropic); hostname fragments are sent, not IPs.
 type NameInference struct {
-	// Source is local_rule | user_alias_mac | user_alias_hostname
+	// Source is local_rule | user_alias_mac | user_alias_hostname | web_llm
 	Source string `json:"source"`
 	// Kind is family | product_hint | user_label
 	Kind string `json:"kind"`
 	// Confidence is high | medium | low
 	Confidence string `json:"confidence"`
-	// Input is the substring, MAC prefix, or field that matched (for transparency).
+	// Input is the substring, MAC prefix, field that matched, or for web_llm: "openai" | "claude".
 	Input string `json:"input"`
 	// Text is the human-readable suggestion shown in UI.
 	Text string `json:"text"`

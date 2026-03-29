@@ -104,6 +104,11 @@ func buildNameHaystack(rec *Record, hints map[string]any) string {
 	return strings.ToLower(strings.Join(parts, " "))
 }
 
+// NameHaystackForEnrichment is the same lowercase string used for local name rules (hostnames, titles, model strings — not IP addresses).
+func NameHaystackForEnrichment(rec *Record, hints map[string]any) string {
+	return buildNameHaystack(rec, hints)
+}
+
 func matchLocalNameRules(hay string) []NameInference {
 	if hay == "" {
 		return nil

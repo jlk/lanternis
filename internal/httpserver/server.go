@@ -124,6 +124,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/runtime", s.handleRuntime)
 	s.mux.HandleFunc("/api/setup/status", s.handleSetupStatus)
 	s.mux.HandleFunc("/api/setup/complete", s.requireCSRF(s.handleSetupComplete))
+	s.mux.HandleFunc("/api/settings/web-enrichment", s.requireCSRF(s.handleWebEnrichmentSettings))
 	s.mux.HandleFunc("/api/scan/status", s.handleScanStatus)
 	s.mux.HandleFunc("/api/scan/start", s.requireCSRF(s.handleScanStart))
 	s.mux.HandleFunc("/api/scan/cancel", s.requireCSRF(s.handleScanCancel))
