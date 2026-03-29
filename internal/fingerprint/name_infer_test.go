@@ -69,6 +69,12 @@ func TestInferencesFromFingerprintBlob(t *testing.T) {
 	}
 }
 
+func TestBuiltinNameRulesCoverage(t *testing.T) {
+	if len(builtinNameRules) < 200 {
+		t.Fatalf("expected large curated rule set (>=200), got %d", len(builtinNameRules))
+	}
+}
+
 func TestLoadDeviceAliasesMissing(t *testing.T) {
 	f, err := LoadDeviceAliases("/nonexistent/lanternis/device_aliases_does_not_exist.json")
 	if err != nil {
