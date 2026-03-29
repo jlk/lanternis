@@ -143,9 +143,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     .muted { color: var(--ln-muted); }
     .status { display: inline-block; min-width: 280px; }
     #errorBox { display: none; background: var(--ln-warn-bg); border: 1px solid var(--ln-warn-border); padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
-    #probeBox { display: none; background: var(--ln-warn-bg); border: 1px solid var(--ln-warn-border); padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
-    #diffStrip { display: none; font-size: 14px; padding: 8px 10px; margin-bottom: 12px; background: var(--ln-surface); border: 1px dashed var(--ln-border); border-radius: 4px; }
-    #portBanner { display: none; background: var(--ln-warn-bg); border: 1px solid var(--ln-warn-border); padding: 8px 10px; border-radius: 4px; margin-bottom: 12px; }
+    #diffStrip { display: none; font-size: 14px; padding: 6px 10px; margin-bottom: 8px; background: var(--ln-surface); border: 1px dashed var(--ln-border); border-radius: 4px; }
+    #portBanner { display: none; background: var(--ln-warn-bg); border: 1px solid var(--ln-warn-border); padding: 6px 10px; border-radius: 4px; margin-bottom: 8px; }
     #portBanner .banner-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; }
     #portBanner .banner-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
     #scanRunsPanel table { font-size: 13px; }
@@ -201,17 +200,6 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       </div>
     </div>
     <div id="errorBox" role="status" aria-live="polite"></div>
-    <div id="probeBox" class="muted" role="status" aria-live="polite"></div>
-    <div id="diffStrip" role="status" aria-live="polite"></div>
-    <div id="portBanner" role="region" aria-label="New open ports since last scan">
-      <div class="banner-row">
-        <span id="portBannerText"></span>
-        <span class="banner-actions">
-          <button type="button" id="portBannerSnooze">Snooze 24h</button>
-          <button type="button" id="portBannerDismiss">Dismiss until next scan</button>
-        </span>
-      </div>
-    </div>
 
     <div id="firstRunOverlay" class="first-run-overlay" role="dialog" aria-modal="true" aria-labelledby="firstRunTitle">
       <div class="first-run-card panel">
@@ -259,6 +247,16 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     </section>
 
     <section class="panel results-panel">
+      <div id="diffStrip" role="status" aria-live="polite"></div>
+      <div id="portBanner" role="region" aria-label="New open ports since last scan">
+        <div class="banner-row">
+          <span id="portBannerText"></span>
+          <span class="banner-actions">
+            <button type="button" id="portBannerSnooze">Snooze 24h</button>
+            <button type="button" id="portBannerDismiss">Dismiss until next scan</button>
+          </span>
+        </div>
+      </div>
       <div class="controls table-toolbar">
         <label class="setup-check" style="margin:0;"><input type="checkbox" id="hideUnknownReach" checked /> Hide unknown reachability</label>
         <details class="column-picker">
@@ -328,7 +326,6 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const cidrInput = document.getElementById("cidrInput");
     const modeSelect = document.getElementById("modeSelect");
     const tableHeaders = Array.from(document.querySelectorAll("thead th[data-col]"));
-    const probeBox = document.getElementById("probeBox");
     const firstRunOverlay = document.getElementById("firstRunOverlay");
     const setupCidrInput = document.getElementById("setupCidrInput");
     const setupAck = document.getElementById("setupAck");
@@ -508,17 +505,16 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       const mode = data.probe_mode || "unknown";
       const guidance = data.probe_guidance || "";
       if (mode === "tcp_fallback") {
-        probeBox.style.display = "block";
-        probeBox.textContent = "Probe mode: TCP fallback. " + guidance;
         probeBadge.textContent = "[Active probe: TCP]";
       } else if (mode === "icmp_echo") {
-        probeBox.style.display = "block";
-        probeBox.textContent = "Probe mode: ICMP echo. " + guidance;
         probeBadge.textContent = "[Active probe: ICMP]";
       } else {
-        probeBox.style.display = "block";
-        probeBox.textContent = "Probe mode: unknown.";
         probeBadge.textContent = "";
+      }
+      if (guidance) {
+        probeBadge.title = guidance;
+      } else {
+        probeBadge.removeAttribute("title");
       }
     }
 
