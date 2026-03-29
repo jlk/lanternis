@@ -150,6 +150,10 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     #portBanner .banner-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
     #scanRunsPanel table { font-size: 13px; }
     #scanRunsPanel td.num { white-space: nowrap; }
+    #scanRunsPanel .drawer-section { margin-top: 12px; }
+    #scanRunsPanel summary + .drawer-section { margin-top: 0; }
+    #scanRunsPanel .drawer-subhead { margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: var(--ln-text); }
+    #scanRunsPanel .drawer-lead { margin: 0 0 8px 0; font-size: 13px; line-height: 1.35; }
     .first-run-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
     .first-run-overlay.open { display: flex; }
     .first-run-card { max-width: 520px; width: 100%; }
@@ -254,36 +258,6 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       <p id="modeHint" class="muted" style="margin: 8px 0 0 0; font-size: 13px; line-height: 1.35;"></p>
     </section>
 
-    <details class="panel" id="scanRunsPanel">
-      <summary>Recent scans</summary>
-      <p class="muted" style="margin:0 0 8px 0; font-size:14px;">Completed and in-progress runs stored for this database (newest first).</p>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Started</th>
-            <th>Ended</th>
-            <th>Mode</th>
-            <th>CIDR</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody id="scanRunsBody"></tbody>
-      </table>
-    </details>
-
-    <details class="panel">
-      <summary>Scan modes &amp; what “reachability” means</summary>
-      <ul>
-        <li><strong>light</strong> — Fewest parallel <em>host</em> workers (12) and the <strong>smallest TCP port set</strong> (HTTP/S-focused). Gentlest on busy LANs.</li>
-        <li><strong>normal</strong> — Default balance (32 workers; web + common IoT ports like RTSP/UPnP-alt).</li>
-        <li><strong>thorough</strong> — Most workers (48) and the <strong>widest TCP port set</strong> (adds SSH, SMB, MQTT, Home Assistant, etc.). Finishes sooner per host batch; more traffic.</li>
-        <li><strong>Open ports</strong> — All probe-list ports that accepted a TCP connect in the current mode (not a full port map). ICMP builds show <code>icmp</code> when echo reply was seen. Empty when the probe got no reply.</li>
-        <li><strong>Reachability</strong> — What we could infer from the active probe (e.g. TCP connect or ICMP). <strong>Observed</strong> means we saw the host via passive discovery (ARP, mDNS, or SSDP) but the active probe did not get a reply. <strong>Unknown</strong> often means “no reply to our probe” and no passive hints yet — not “offline for sure.” Hidden rows may still be interesting later (M1a fingerprints, etc.).</li>
-        <li><strong>Hints</strong> — Passive clues merged from this machine after you start a scan: ARP (Linux/macOS), local SSDP (UPnP discovery), and mDNS names heard on the LAN. They do not replace reachability from probes.</li>
-      </ul>
-    </details>
-
     <section class="panel results-panel">
       <div class="controls table-toolbar">
         <label class="setup-check" style="margin:0;"><input type="checkbox" id="hideUnknownReach" checked /> Hide unknown reachability</label>
@@ -312,6 +286,37 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         </table>
       </div>
     </section>
+
+    <details class="panel" id="scanRunsPanel">
+      <summary>Recent scans &amp; mode help</summary>
+      <div class="drawer-section">
+        <p class="muted drawer-lead">Completed and in-progress runs for this database (newest first).</p>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Started</th>
+              <th>Ended</th>
+              <th>Mode</th>
+              <th>CIDR</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="scanRunsBody"></tbody>
+        </table>
+      </div>
+      <div class="drawer-section">
+        <h3 class="drawer-subhead">Scan modes &amp; what “reachability” means</h3>
+        <ul>
+          <li><strong>light</strong> — Fewest parallel <em>host</em> workers (12) and the <strong>smallest TCP port set</strong> (HTTP/S-focused). Gentlest on busy LANs.</li>
+          <li><strong>normal</strong> — Default balance (32 workers; web + common IoT ports like RTSP/UPnP-alt).</li>
+          <li><strong>thorough</strong> — Most workers (48) and the <strong>widest TCP port set</strong> (adds SSH, SMB, MQTT, Home Assistant, etc.). Finishes sooner per host batch; more traffic.</li>
+          <li><strong>Open ports</strong> — All probe-list ports that accepted a TCP connect in the current mode (not a full port map). ICMP builds show <code>icmp</code> when echo reply was seen. Empty when the probe got no reply.</li>
+          <li><strong>Reachability</strong> — What we could infer from the active probe (e.g. TCP connect or ICMP). <strong>Observed</strong> means we saw the host via passive discovery (ARP, mDNS, or SSDP) but the active probe did not get a reply. <strong>Unknown</strong> often means “no reply to our probe” and no passive hints yet — not “offline for sure.” Hidden rows may still be interesting later (M1a fingerprints, etc.).</li>
+          <li><strong>Hints</strong> — Passive clues merged from this machine after you start a scan: ARP (Linux/macOS), local SSDP (UPnP discovery), and mDNS names heard on the LAN. They do not replace reachability from probes.</li>
+        </ul>
+      </div>
+    </details>
   </main>
   <script>
     let csrfToken = "";
