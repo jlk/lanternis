@@ -33,3 +33,4 @@ go.work
 *.db
 *.db-wal
 *.db-shm
+.gstack/
