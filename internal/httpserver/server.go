@@ -108,9 +108,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       --ln-accent:#5c9eff; --ln-warn-bg:#3d3200; --ln-warn-border:#6b5a00; --ln-on-accent:#0d1117;
     }
     body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--ln-bg); color: var(--ln-text); transition: background 0.15s ease, color 0.15s ease; }
-    main { max-width: 1080px; margin: 0 auto; padding: 16px; }
-    h1 { margin-top: 0; }
-    .panel { background: var(--ln-surface); border: 1px solid var(--ln-border); border-radius: 4px; padding: 12px; margin-bottom: 12px; }
+    main { max-width: 1080px; margin: 0 auto; padding: 12px 16px 16px 16px; min-height: 100vh; display: flex; flex-direction: column; }
+    h1 { margin: 0; font-size: 20px; line-height: 1.1; letter-spacing: -0.01em; }
+    .panel { background: var(--ln-surface); border: 1px solid var(--ln-border); border-radius: 4px; padding: 12px; margin-bottom: 10px; }
     .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     label { font-size: 14px; color: var(--ln-muted); }
     input, select, button { font: inherit; min-height: 44px; padding: 9px 12px; border-radius: 4px; border: 1px solid var(--ln-border); background: var(--ln-surface); color: var(--ln-text); }
@@ -120,6 +120,25 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     table { width: 100%; border-collapse: collapse; background: var(--ln-surface); }
     th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--ln-border); font-size: 14px; }
     th { font-weight: 600; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .topbar .right { display: flex; align-items: center; gap: 8px; }
+    .subhead { margin: 0; font-size: 13px; line-height: 1.35; color: var(--ln-muted); }
+    .results-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .results-panel .table-toolbar { margin-bottom: 10px; }
+    .table-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--ln-border); border-radius: 4px; }
+    .table-scroll table { border: 0; }
+    .table-scroll thead th { position: sticky; top: 0; background: var(--ln-surface); z-index: 1; }
+    .table-scroll tbody tr.host-row:hover { background: color-mix(in srgb, var(--ln-accent) 8%, transparent); }
+    .table-scroll th, .table-scroll td { border-bottom: 1px solid var(--ln-border); }
+    .table-scroll tr:last-child td { border-bottom: 0; }
+    .scanbar { display: grid; grid-template-columns: auto auto 1fr 1fr auto auto auto; gap: 8px; align-items: center; }
+    .scanbar .status { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .scanbar label { display: inline-flex; align-items: center; gap: 8px; }
+    .scanbar label input { width: 180px; }
+    @media (max-width: 880px) {
+      .scanbar { grid-template-columns: 1fr 1fr; }
+      .scanbar label input { width: 100%; }
+    }
     td.num { font-variant-numeric: tabular-nums; }
     .muted { color: var(--ln-muted); }
     .status { display: inline-block; min-width: 280px; }
@@ -167,8 +186,16 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
 </head>
 <body>
   <main>
-    <h1>Lanternis</h1>
-    <p class="muted">Local network scanner. Unknown means unknown; we do not invent confidence.</p>
+    <div class="topbar">
+      <div>
+        <h1>Lanternis</h1>
+        <p class="subhead">Local network inventory. Unknown means unknown — we do not invent confidence.</p>
+      </div>
+      <div class="right">
+        <button type="button" id="themeToggle" aria-pressed="false" title="Switch to dark mode">Dark mode</button>
+        <a class="muted" href="/about">Diagnostics</a>
+      </div>
+    </div>
     <div id="errorBox" role="status" aria-live="polite"></div>
     <div id="probeBox" class="muted" role="status" aria-live="polite"></div>
     <div id="diffStrip" role="status" aria-live="polite"></div>
@@ -209,7 +236,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     </div>
 
     <section class="panel">
-      <div class="controls">
+      <div class="scanbar">
         <button id="startBtn" class="primary">Start scan</button>
         <button id="cancelBtn">Cancel</button>
         <label title="IPv4 network in CIDR form (e.g. 192.168.1.0/24). Only this range is scanned.">CIDR <input id="cidrInput" value="192.168.1.0/24" autocomplete="off" spellcheck="false" /></label>
@@ -221,11 +248,10 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
           </select>
         </label>
         <span id="statusText" class="status muted" aria-live="polite">Status: idle</span>
-        <span id="probeBadge" class="muted" style="margin-left:8px;" aria-live="polite"></span>
-        <button type="button" id="themeToggle" aria-pressed="false" title="Switch to dark mode">Dark mode</button>
+        <span id="probeBadge" class="muted" aria-live="polite"></span>
         <button type="button" id="diffExportBtn" title="Download scan diff JSON">Export diff</button>
       </div>
-      <p id="modeHint" class="muted" style="margin: 10px 0 0 0; font-size: 14px; line-height: 1.45;"></p>
+      <p id="modeHint" class="muted" style="margin: 8px 0 0 0; font-size: 13px; line-height: 1.35;"></p>
     </section>
 
     <details class="panel" id="scanRunsPanel">
@@ -258,7 +284,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       </ul>
     </details>
 
-    <section class="panel">
+    <section class="panel results-panel">
       <div class="controls table-toolbar">
         <label class="setup-check" style="margin:0;"><input type="checkbox" id="hideUnknownReach" checked /> Hide unknown reachability</label>
         <details class="column-picker">
@@ -267,26 +293,25 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         </details>
         <span id="hostCount" class="muted" aria-live="polite"></span>
       </div>
-      <table id="hostsTable">
-        <caption>Devices on your LAN for this database. Sort by clicking headers. Choose columns with <strong>Table columns</strong>. <strong>Click a row</strong> for evidence and scan history.</caption>
-        <thead>
-          <tr>
-            <th data-col="ip" role="button" tabindex="0" title="Sort by IP">IP</th>
-            <th data-col="reachability" role="button" tabindex="0" title="Sort by reachability">Reachability</th>
-            <th data-col="open_ports" role="button" tabindex="0" title="Sort by open ports (active probe)">Open ports</th>
-            <th data-col="vendor" role="button" tabindex="0" title="Sort by vendor (fingerprint)">Vendor</th>
-            <th data-col="device_class" role="button" tabindex="0" title="Sort by inferred device kind">Kind</th>
-            <th data-col="label" role="button" tabindex="0" title="Sort by label">Label</th>
-            <th data-col="confidence" role="button" tabindex="0" title="Sort by confidence">Confidence</th>
-            <th data-col="last_seen" role="button" tabindex="0" title="Sort by last seen">Last seen</th>
-            <th data-col="hints" role="button" tabindex="0" title="Sort by passive hints">Hints</th>
-          </tr>
-        </thead>
-        <tbody id="hostsBody"></tbody>
-      </table>
+      <div class="table-scroll" id="hostsTableScroll" role="region" aria-label="Devices table">
+        <table id="hostsTable">
+          <thead>
+            <tr>
+              <th data-col="ip" role="button" tabindex="0" title="Sort by IP">IP</th>
+              <th data-col="reachability" role="button" tabindex="0" title="Sort by reachability">Reachability</th>
+              <th data-col="open_ports" role="button" tabindex="0" title="Sort by open ports (active probe)">Open ports</th>
+              <th data-col="vendor" role="button" tabindex="0" title="Sort by vendor (fingerprint)">Vendor</th>
+              <th data-col="device_class" role="button" tabindex="0" title="Sort by inferred device kind">Kind</th>
+              <th data-col="label" role="button" tabindex="0" title="Sort by label">Label</th>
+              <th data-col="confidence" role="button" tabindex="0" title="Sort by confidence">Confidence</th>
+              <th data-col="last_seen" role="button" tabindex="0" title="Sort by last seen">Last seen</th>
+              <th data-col="hints" role="button" tabindex="0" title="Sort by passive hints">Hints</th>
+            </tr>
+          </thead>
+          <tbody id="hostsBody"></tbody>
+        </table>
+      </div>
     </section>
-
-    <p class="muted">Only scans your configured network from this computer. <a href="/about">Diagnostics</a></p>
   </main>
   <script>
     let csrfToken = "";
