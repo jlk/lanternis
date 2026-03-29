@@ -165,9 +165,10 @@ Define **`fingerprint_blob` v1** as the **identity record**, including **L4 slot
 
 ## 4. Current repo reality (baseline)
 
-- **Stored:** `raw_hints_json` (ARP, mDNS, SSDP), **open_ports**, `**fingerprint_blob`** unused as a structured identity record.
-- **Scanner:** still `**confidence: "unknown"`** until fingerprint pass defines policy.
-- **Rule:** defer **pluggable packs** until **3+** heuristics prove merge shape (`TODOS.md`).
+- **Stored:** `raw_hints_json` (ARP MAC, SSDP `st_types`/`server`/`location`, mDNS **names + service types/TXT**), **open_ports**, and a structured **`fingerprint_blob`** JSON record.
+- **Fingerprint pass (post-scan):** derives `manufacturer/model/serial` (UPnP XML), vendor (OUI or manufacturer), **reverse DNS (PTR)** names, HTTP(S) title + **Server** headers, TLS cert names, SSH banner, plus a heuristic **`device_class`** (“kind”) fused from ports + SSDP + mDNS + PTR + web banners.
+- **UI:** host list shows **Vendor** and **Kind**; per-host detail shows the **evidence chain** and per-scan snapshot history.
+- **Rule:** still defer **pluggable packs** until **3+** heuristics prove merge shape (`TODOS.md`).
 
 ---
 
