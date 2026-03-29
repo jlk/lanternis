@@ -113,7 +113,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     .panel { background: var(--ln-surface); border: 1px solid var(--ln-border); border-radius: 4px; padding: 12px; margin-bottom: 12px; }
     .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     label { font-size: 14px; color: var(--ln-muted); }
-    input, select, button { font: inherit; padding: 8px 10px; border-radius: 4px; border: 1px solid var(--ln-border); background: var(--ln-surface); color: var(--ln-text); }
+    input, select, button { font: inherit; min-height: 44px; padding: 9px 12px; border-radius: 4px; border: 1px solid var(--ln-border); background: var(--ln-surface); color: var(--ln-text); }
+    input[type="checkbox"] { min-height: 0; width: 16px; height: 16px; padding: 0; }
     button.primary { background: var(--ln-accent); color: var(--ln-on-accent); border-color: var(--ln-accent); }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
     table { width: 100%; border-collapse: collapse; background: var(--ln-surface); }
@@ -141,7 +142,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     details.panel ul { margin: 0; padding-left: 1.25rem; color: var(--ln-muted); font-size: 14px; line-height: 1.5; }
     .table-toolbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     .column-picker { font-size: 13px; color: var(--ln-muted); }
-    .column-picker summary { cursor: pointer; font-weight: 600; color: var(--ln-text); list-style: none; }
+    .column-picker summary { cursor: pointer; font-weight: 600; color: var(--ln-text); list-style: none; display: inline-flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--ln-border); border-radius: 4px; background: var(--ln-surface); min-height: 44px; }
+    .column-picker[open] summary { border-color: color-mix(in srgb, var(--ln-accent) 50%, var(--ln-border)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ln-accent) 22%, transparent); }
     .column-picker summary::-webkit-details-marker { display: none; }
     .column-picker .column-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 12px; margin-top: 8px; padding: 10px; border: 1px solid var(--ln-border); border-radius: 4px; background: var(--ln-surface); max-width: 520px; }
     caption { caption-side: top; text-align: left; font-size: 13px; color: var(--ln-muted); padding: 0 0 8px 0; }
