@@ -10,7 +10,8 @@ import (
 )
 
 // Build derives a fingerprint Record from host hints, open ports, and optional HTTP/TLS/SSH probes.
-func Build(ctx context.Context, h store.Host, hints map[string]any, client *http.Client) (*Record, error) {
+// opts may be nil (equivalent to default normal profile).
+func Build(ctx context.Context, h store.Host, hints map[string]any, client *http.Client, opts *BuildOptions) (*Record, error) {
 	if client == nil {
 		client = DefaultHTTPClient()
 	}
@@ -269,6 +270,29 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 
+	// SMB native OS / LAN (445) — anonymous SMB1 extended security where supported.
+	if ports["445"] {
+		if os, lan := FetchSMBNativeStrings(ctx, h.IP, "445"); os != "" || lan != "" {
+			pctx.SMBNativeOS, pctx.SMBNativeLAN = os, lan
+		}
+	}
+
+	// RDP negotiation peek (3389).
+	if ports["3389"] {
+		if hint := FetchRDPNegotiationHint(ctx, h.IP, "3389"); hint != "" {
+			pctx.RDPHint = hint
+		}
+	}
+
+	// Raw SYN/SYN-ACK TCP fingerprint (Linux + CAP_NET_RAW / root; deep scan only — explicit).
+	if tcpProfileDeep(opts) {
+		if dport := firstOpenPortForStackProbe(ports); dport != "" {
+			if hint := probeTCPStackHint(ctx, h.IP, dport); hint != "" {
+				pctx.TCPStackHint = hint
+			}
+		}
+	}
+
 	ApplyOSInference(rec, hints, pctx)
 
 	ClassifyDevice(rec, h, hints, pctx)
@@ -344,6 +368,15 @@ func summarize(rec *Record) string {
 	}
 	if rec.DeviceClass != "" {
 		return rec.DeviceClass
+	}
+	return ""
+}
+
+func firstOpenPortForStackProbe(ports map[string]bool) string {
+	for _, p := range []string{"443", "80", "22", "445", "3389", "8080"} {
+		if ports[p] {
+			return p
+		}
 	}
 	return ""
 }

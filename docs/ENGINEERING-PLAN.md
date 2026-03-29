@@ -70,7 +70,7 @@ The **full** vision touches **>8** packages/files — **acceptable** if shipped 
 
 | Table / entity | Purpose |
 |----------------|---------|
-| `scan_runs` | id, started_at, ended_at, profile_id, mode (light/normal/thorough), cancel_requested |
+| `scan_runs` | id, started_at, ended_at, profile_id, mode (light/normal/thorough/deep), cancel_requested |
 | `hosts` | ip, last_seen, reachability, raw hints (mDNS name JSON), confidence, fingerprint blob |
 | `intel_cache` | key, payload_json, fetched_at, ttl_class (aligns design NFRs) |
 | `audit_events` | id, ts, event_type, payload_json **without secrets**; **INSERT-only** in app code |

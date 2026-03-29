@@ -36,7 +36,7 @@ func PortsForTCPProfile(profile string) []string {
 	switch NormalizeTCPProfile(profile) {
 	case TCPProfileLight:
 		return append([]string(nil), tcpPortsLight...)
-	case TCPProfileThorough:
+	case TCPProfileThorough, TCPProfileDeep:
 		out := append(append(append([]string{}, tcpPortsLight...), tcpPortsNormalExtra...), tcpPortsThoroughExtra...)
 		return dedupeStringsStable(out)
 	default:
@@ -61,6 +61,8 @@ func budgetForTCPProfile(profile string) time.Duration {
 	switch NormalizeTCPProfile(profile) {
 	case TCPProfileLight:
 		return 260 * time.Millisecond
+	case TCPProfileDeep:
+		return 720 * time.Millisecond
 	case TCPProfileThorough:
 		return 480 * time.Millisecond
 	default:
@@ -132,5 +134,6 @@ func TCPProbeProfiles() map[string][]string {
 		TCPProfileLight:    PortsForTCPProfile(TCPProfileLight),
 		TCPProfileNormal:   PortsForTCPProfile(TCPProfileNormal),
 		TCPProfileThorough: PortsForTCPProfile(TCPProfileThorough),
+		TCPProfileDeep:     PortsForTCPProfile(TCPProfileDeep),
 	}
 }

@@ -32,7 +32,7 @@ func TestInferOSFromHTTPServerIIS(t *testing.T) {
 func TestInferOSFromSSDP(t *testing.T) {
 	t.Parallel()
 	ev := inferOSFromSSDPServer("Linux, UPnP/1.0, Private SDK")
-	if ev == nil || ev.family != OSFamilyLinux {
+	if ev == nil || ev.family != OSFamilyUnknown || ev.tier != tierWeak {
 		t.Fatalf("got %+v", ev)
 	}
 }
@@ -49,16 +49,31 @@ func TestApplyOSInferenceMerge(t *testing.T) {
 	t.Parallel()
 	rec := &Record{SchemaVersion: 1}
 	pctx := ProbeContext{
-		SSHBanner:     `SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3`,
-		HTTPServer80:  "nginx/1.22.1",
-		HTTPServer443: "Microsoft-IIS/10.0",
+		SSHBanner:    `SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3`,
+		HTTPServer80: "nginx/1.22.1",
 	}
 	hints := map[string]any{
 		"ssdp": map[string]any{"server": "Linux, UPnP/1.0"},
 	}
 	ApplyOSInference(rec, hints, pctx)
-	// IIS / Windows should beat Debian SSH on score? Debian 72, IIS 62, SSDP linux 40
+	// Debian SSH (strong) should win over weak nginx/SSDP text.
 	if rec.OSFamily != OSFamilyLinux || !strings.Contains(rec.OSDetail, "Debian") {
 		t.Fatalf("want Debian SSH to win, got family=%q detail=%q", rec.OSFamily, rec.OSDetail)
+	}
+	if rec.OSConflict {
+		t.Fatal("unexpected OS conflict")
+	}
+}
+
+func TestMergeOSConflict(t *testing.T) {
+	t.Parallel()
+	rec := &Record{SchemaVersion: 1}
+	pctx := ProbeContext{
+		SSHBanner:     `SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3`,
+		HTTPServer443: "Microsoft-IIS/10.0",
+	}
+	ApplyOSInference(rec, map[string]any{}, pctx)
+	if !rec.OSConflict || rec.OSFamily != OSFamilyUnknown {
+		t.Fatalf("want conflict + unknown family, got conflict=%v family=%q detail=%q", rec.OSConflict, rec.OSFamily, rec.OSDetail)
 	}
 }

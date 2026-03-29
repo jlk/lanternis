@@ -68,7 +68,7 @@ func TestBuildAddsPTRSignal(t *testing.T) {
 		Reachability: "reachable",
 		LastSeen:     time.Now().UTC(),
 	}
-	rec, err := Build(ctx, h, map[string]any{}, nil)
+	rec, err := Build(ctx, h, map[string]any{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

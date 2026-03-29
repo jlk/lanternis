@@ -237,6 +237,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
             <option value="light" title="12 parallel host probes; smallest TCP port set (web-focused).">light</option>
             <option value="normal" title="32 parallel; balanced TCP port list (web + common IoT)." selected>normal</option>
             <option value="thorough" title="48 parallel; widest TCP port list; more traffic per host.">thorough</option>
+            <option value="deep" title="Same breadth as thorough; longer per-host probes; optional raw TCP stack fingerprint on Linux (elevated privileges).">deep</option>
           </select>
         </label>
         <span id="statusText" class="status muted" aria-live="polite">Status: idle</span>
@@ -274,6 +275,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
               <th data-col="open_ports" role="button" tabindex="0" title="Sort by open ports (active probe)">Open ports</th>
               <th data-col="vendor" role="button" tabindex="0" title="Sort by vendor (fingerprint)">Vendor</th>
               <th data-col="device_class" role="button" tabindex="0" title="Sort by inferred device kind">Kind</th>
+              <th data-col="os" role="button" tabindex="0" title="Sort by inferred OS (fingerprint)">OS</th>
               <th data-col="label" role="button" tabindex="0" title="Sort by label">Label</th>
               <th data-col="confidence" role="button" tabindex="0" title="Sort by confidence">Confidence</th>
               <th data-col="last_seen" role="button" tabindex="0" title="Sort by last seen">Last seen</th>
@@ -309,6 +311,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
           <li><strong>light</strong> — Fewest parallel <em>host</em> workers (12) and the <strong>smallest TCP port set</strong> (HTTP/S-focused). Gentlest on busy LANs.</li>
           <li><strong>normal</strong> — Default balance (32 workers; web + common IoT ports like RTSP/UPnP-alt).</li>
           <li><strong>thorough</strong> — Most workers (48) and the <strong>widest TCP port set</strong> (adds SSH, SMB, MQTT, Home Assistant, etc.). Finishes sooner per host batch; more traffic.</li>
+          <li><strong>deep</strong> — Same port list as thorough with <strong>longer connect budgets</strong>. Use when you explicitly want heavier probes; on Linux, raw SYN/SYN+ACK TCP fingerprinting (needs capability/root) runs in this mode only.</li>
           <li><strong>Open ports</strong> — All probe-list ports that accepted a TCP connect in the current mode (not a full port map). ICMP builds show <code>icmp</code> when echo reply was seen. Empty when the probe got no reply.</li>
           <li><strong>Reachability</strong> — What we could infer from the active probe (e.g. TCP connect or ICMP). <strong>Observed</strong> means we saw the host via passive discovery (ARP, mDNS, or SSDP) but the active probe did not get a reply. <strong>Unknown</strong> often means “no reply to our probe” and no passive hints yet — not “offline for sure.” Hidden rows may still be interesting later (M1a fingerprints, etc.).</li>
           <li><strong>Hints</strong> — Passive clues merged from this machine after you start a scan: ARP (Linux/macOS), local SSDP (UPnP discovery), and mDNS names heard on the LAN. They do not replace reachability from probes.</li>
@@ -351,6 +354,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       { id: "open_ports", label: "Open ports" },
       { id: "vendor", label: "Vendor" },
       { id: "device_class", label: "Kind" },
+      { id: "os", label: "OS" },
       { id: "label", label: "Label" },
       { id: "confidence", label: "Confidence" },
       { id: "last_seen", label: "Last seen" },
@@ -463,7 +467,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const modeHints = {
       light: "Light: 12 parallel host probes + smallest TCP port set (web).",
       normal: "Normal: 32 parallel + balanced TCP ports (web + common IoT).",
-      thorough: "Thorough: 48 parallel + widest TCP port list (more services probed per host)."
+      thorough: "Thorough: 48 parallel + widest TCP port list (more services probed per host).",
+      deep: "Deep: same ports as thorough + longer probes; Linux raw TCP stack fingerprint (opt-in, elevated privileges)."
     };
 
     function refreshModeHint() {
@@ -491,7 +496,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
 
     function mapModeToConcurrency(mode) {
       if (mode === "light") return 12;
-      if (mode === "thorough") return 48;
+      if (mode === "thorough" || mode === "deep") return 48;
       return 32;
     }
 
@@ -611,6 +616,28 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       return String(h.reachability || "unknown").toLowerCase() === "unknown";
     }
 
+    function osTableCell(h) {
+      const fp = h.fingerprint;
+      if (!fp || typeof fp !== "object") {
+        return "<td class='muted'>—</td>";
+      }
+      if (fp.os_conflict) {
+        const full = String(fp.os_detail || "Conflicting OS hints").trim();
+        return "<td class='muted' title=\"" + esc(full) + "\">Conflict</td>";
+      }
+      const det = String(fp.os_detail || "").trim();
+      const fam = String(fp.os_family || "").trim();
+      let text = det || (fam && fam !== "unknown" ? fam : "");
+      if (!text) {
+        return "<td class='muted'>—</td>";
+      }
+      const full = text;
+      if (text.length > 56) {
+        text = text.slice(0, 53) + "…";
+      }
+      return "<td class='muted' title=\"" + esc(full) + "\">" + esc(text) + "</td>";
+    }
+
     function hintSummary(h) {
       try {
         const rh = h.raw_hints;
@@ -639,6 +666,19 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       return h.open_ports.slice().sort().join(",");
     }
 
+    function osSortKey(h) {
+      const fp = h.fingerprint;
+      if (!fp || typeof fp !== "object") {
+        return "";
+      }
+      if (fp.os_conflict) {
+        return "conflict";
+      }
+      const det = String(fp.os_detail || "").toLowerCase().trim();
+      const fam = String(fp.os_family || "").toLowerCase().trim();
+      return (det || fam || "").trim();
+    }
+
     function sortedHosts() {
       const rows = (currentHosts || []).slice();
       rows.sort((a, b) => {
@@ -658,6 +698,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         }
         if (sort.col === "device_class") {
           return dir * String(a.device_class || "").toLowerCase().localeCompare(String(b.device_class || "").toLowerCase());
+        }
+        if (sort.col === "os") {
+          return dir * osSortKey(a).localeCompare(osSortKey(b));
         }
         const av = String((a[sort.col] ?? "")).toLowerCase();
         const bv = String((b[sort.col] ?? "")).toLowerCase();
@@ -721,6 +764,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         }
         if (hostColVisible("device_class")) {
           cells.push("<td class='muted'>" + (kind ? esc(kind) : "—") + "</td>");
+        }
+        if (hostColVisible("os")) {
+          cells.push(osTableCell(h));
         }
         if (hostColVisible("label")) {
           cells.push("<td>" + (h.label || "Unknown") + "</td>");
@@ -802,7 +848,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       const hist = d.scan_history || [];
       const fp = h.fingerprint || null;
       const vendorDisp = String(h.vendor || "").trim();
-      let fpHtml = "<p class='muted'>No fingerprint record yet. After a scan completes, we store merged evidence: passive ARP / SSDP / mDNS, reverse DNS (PTR), UPnP device XML when available, OUI, HTTP(S) title and Server headers, TLS cert names, and SSH banners on open ports.</p>";
+      let fpHtml = "<p class='muted'>No fingerprint record yet. After a scan completes, we store merged evidence: passive ARP / SSDP / mDNS, reverse DNS (PTR), UPnP device XML when available, OUI, HTTP(S) title and Server headers, TLS cert names, SSH banners, and (when ports are open) anonymous SMB strings and an RDP negotiation peek. <strong>Deep</strong> scan mode on Linux may add a raw SYN/SYN+ACK TCP fingerprint if the process has permission — not SNMP.</p>";
       if (fp && typeof fp === "object") {
         const sigs = fp.signals || [];
         const sigLis = sigs.map(function (s) {
@@ -832,8 +878,20 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         }
         if (fp.os_family || fp.os_detail) {
           var osDisp = (fp.os_detail && String(fp.os_detail).trim()) || String(fp.os_family || "");
+          var osNote = "SSH / HTTP / SSDP / SMB / RDP peek; best-effort.";
+          if (fp.os_conflict) {
+            osNote = "Independent hints disagreed; family left unknown — see evidence chain.";
+          } else {
+            var hasStack = false;
+            for (var si = 0; si < sigs.length; si++) {
+              if (sigs[si].source === "os_tcp_stack") { hasStack = true; break; }
+            }
+            if (hasStack) {
+              osNote += " Raw TCP stack fingerprint (deep scan on Linux) needs elevated privileges; heuristic.";
+            }
+          }
           fpHtml += "<dt>OS (inferred)</dt><dd>" + esc(osDisp) +
-            " <span class='muted'>(SSH / HTTP Server / SSDP; best-effort)</span></dd>";
+            " <span class='muted'>(" + osNote + ")</span></dd>";
         }
         if (fp.serial) {
           fpHtml += "<dt>Serial</dt><dd>" + esc(fp.serial) + "</dd>";
@@ -1429,7 +1487,7 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		"mode":    req.Mode,
 	})
 
-	go s.watchAndFinalize(dbRunID, scanStartedAt, req.CIDR, passiveDone)
+	go s.watchAndFinalize(dbRunID, scanStartedAt, req.CIDR, req.Mode, passiveDone)
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		// scan_id is the SQLite scan_runs primary key; the scanner's internal runID is not stable across runs.
 		"scan_id": dbRunID,
@@ -1533,7 +1591,7 @@ func countReachabilityInCIDR(hosts []store.Host, cidr string) (reachable, unreac
 	return
 }
 
-func (s *Server) watchAndFinalize(dbRunID int64, scanStartedAt time.Time, cidr string, passiveDone <-chan passiveOutcome) {
+func (s *Server) watchAndFinalize(dbRunID int64, scanStartedAt time.Time, cidr string, tcpScanMode string, passiveDone <-chan passiveOutcome) {
 	if s.debug {
 		s.debugf("watch scan_id=%d waiting for active probe to finish", dbRunID)
 	}
@@ -1575,7 +1633,7 @@ func (s *Server) watchAndFinalize(dbRunID int64, scanStartedAt time.Time, cidr s
 				return
 			}
 			if !cancelled {
-				s.applyFingerprints(ctx, cidr, hosts)
+				s.applyFingerprints(ctx, cidr, hosts, tcpScanMode)
 				hosts, err = s.store.ListHosts(ctx)
 				if err != nil {
 					s.logger.Printf("scan summary scan_id=%d: list hosts after fingerprint: %v", dbRunID, err)

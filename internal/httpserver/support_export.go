@@ -119,6 +119,7 @@ func (s *Server) buildSupportBundle(ctx context.Context) (map[string]any, error)
 			"light":    12,
 			"normal":   32,
 			"thorough": 48,
+			"deep":     48,
 		},
 		"last_scan": lastScan,
 		"inventory_summary": map[string]any{

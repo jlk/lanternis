@@ -65,6 +65,7 @@ func (s *Server) buildDiagnostics(ctx context.Context) (map[string]any, error) {
 			"light":    12,
 			"normal":   32,
 			"thorough": 48,
+			"deep":     48,
 		},
 		"last_scan":    lastScan,
 		"audit_events": events,

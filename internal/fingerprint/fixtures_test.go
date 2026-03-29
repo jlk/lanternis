@@ -69,7 +69,7 @@ func TestFingerprintFixtures(t *testing.T) {
 				OpenPorts: fx.Host.OpenPorts,
 				LastSeen:  time.Now().UTC(),
 			}
-			rec, err := Build(t.Context(), h, fx.Hints, nil)
+			rec, err := Build(t.Context(), h, fx.Hints, nil, nil)
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}

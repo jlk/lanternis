@@ -21,7 +21,7 @@ func TestBuildOUIOnly(t *testing.T) {
 		"arp": map[string]any{"mac": "00:11:22:33:44:55"},
 	}
 	// Prefix not in embedded DB → may return nil if no other signals
-	rec, err := Build(ctx, h, hints, nil)
+	rec, err := Build(ctx, h, hints, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestBuildOUIOnly(t *testing.T) {
 	}
 
 	hints["arp"] = map[string]any{"mac": "00:1A:11:00:00:01"} // Google OUI in embed
-	rec2, err := Build(ctx, h, hints, nil)
+	rec2, err := Build(ctx, h, hints, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

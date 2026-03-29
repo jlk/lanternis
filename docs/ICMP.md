@@ -8,7 +8,7 @@ Lanternis has two probe strategies:
 | **Permissions** | Unprivileged | Elevated privileges often required (see [OS matrix](#icmp-permissions-by-os)) |
 | **Tradeoff** | Misses silent hosts with no matching ports open; polite | Closer to a classic “ping sweep” |
 
-**Scan modes** (`light` / `normal` / `thorough`) control both **parallel host workers** and **TCP port breadth** (see `internal/discovery/tcp_probe.go`: `PortsForTCPProfile` / `TCPProfileLight|Normal|Thorough`). The integration build ignores TCP profiles and uses ICMP only.
+**Scan modes** (`light` / `normal` / `thorough` / `deep`) control both **parallel host workers** and **TCP port breadth** (see `internal/discovery/tcp_probe.go`: `PortsForTCPProfile` / `TCPProfileLight|Normal|Thorough|Deep`). **`deep`** uses the same port list as **thorough** with longer per-host connect budgets and enables optional raw TCP stack fingerprinting in the fingerprint pass on Linux. The integration build ignores TCP profiles and uses ICMP only.
 
 Diagnostics (`GET /api/diagnostics`) includes `tcp_probe_profiles` with the port lists per mode (default build).
 

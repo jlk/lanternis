@@ -23,6 +23,12 @@ type ProbeContext struct {
 	TLSCN8443      string
 	SSHBanner      string
 	MDNSServices   []MDNSServiceHint
+
+	// Optional OS probes (filled by Build before ApplyOSInference).
+	SMBNativeOS   string
+	SMBNativeLAN  string
+	RDPHint       string // RDP negotiation / stack summary
+	TCPStackHint  string // e.g. ttl=128 win=64240 (Linux raw SYN, thorough only)
 }
 
 type MDNSServiceHint struct {

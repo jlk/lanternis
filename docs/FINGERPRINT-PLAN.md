@@ -29,12 +29,12 @@ No serious tool promises perfect automatic naming for every cheap IoT widget. Wh
 | **L1 — NIC vendor**             | “The network interface is probably from **vendor X**.”                                         | IEEE MA-L/M/M-S lookup from MAC                                                                                                 |
 | **L2 — Role / class**           | “This behaves like a **camera**, **speaker**, **printer**, **router**, **hub**, …”             | SSDP `ST` / device type, mDNS service types (`_hap`, `_googlecast`, `_ipp`), DHCP class (if seen)                               |
 | **L3 — Ecosystem / family**     | “Likely **Chromecast / Google TV stack**, **HomeKit**, **Alexa-class**, …”                     | mDNS names + service combos, SSDP `SERVER`, HTTP `Server`, TLS ALPN/SNI patterns                                                |
-| **L4 — Product or model hints** | “**Manufacturer model string**, firmware-ish version, or hostname that encodes serial prefix.” | UPnP **device description XML** from `LOCATION`, HTTP `<title>`, SSH banner, TLS cert subject, SNMP `sysDescr` (if ever probed) |
+| **L4 — Product or model hints** | “**Manufacturer model string**, firmware-ish version, or hostname that encodes serial prefix.” | UPnP **device description XML** from `LOCATION`, HTTP `<title>`, SSH banner, TLS cert subject (**SNMP is out of scope for this project** — see §6) |
 | **L5 — Ground truth label**     | “**Living room TV**” or “**kid’s laptop**”—truth for *this* home.                              | **User-edited name**, pinned to MAC/IP history                                                                                  |
 | **L6 — Posture (intel)**        | “Known vulns for **this software version**” (when L4 gives CPE-like facts).                    | **NVD / OSV** using stored API keys; **never** the primary name source                                                          |
 
 
-**Visionary but honest:** most homes will land many devices at **L2–L3** without heroic effort. **L4** is the stretch goal for “what device is this?” in the **product** sense; it requires **richer protocol surfaces** (UPnP description, HTTPS to LAN devices, optional SNMP) and **merge logic** that does not collapse uncertainty.
+**Visionary but honest:** most homes will land many devices at **L2–L3** without heroic effort. **L4** is the stretch goal for “what device is this?” in the **product** sense; it requires **richer protocol surfaces** (UPnP description, HTTPS to LAN devices) and **merge logic** (tiered / fusion-style) that does not collapse uncertainty. **Primary target:** consumer **IoT** and appliances; a little Windows on the LAN is incidental. **SMB:** only minimal anonymous probes for now—no SMB2+ expansion until basics are solid.
 
 The plan below is how we **climb the ladder in software**—and where **humans** stay in the loop when automation plateaus.
 
@@ -68,7 +68,7 @@ An identity record reaches **L4** when it contains at least one **structured pro
 
 | Field (examples) | Typical source |
 |------------------|----------------|
-| `manufacturer` / `model_name` / `model_number` | UPnP device description (`friendlyName`, `modelName`, `manufacturer`), SNMP `sysDescr`, HTTP landing page text |
+| `manufacturer` / `model_name` / `model_number` | UPnP device description (`friendlyName`, `modelName`, `manufacturer`), HTTP landing page text |
 | `software_version` / `firmware_version` | UPnP `device`/`service` fields, SSH banner, HTTP `Server` + body, TLS cert O/OU if present |
 | `serial` or serial-like | UPnP XML, rare HTTP admin pages (careful with PII—prefer model over serial in UI) |
 
@@ -113,7 +113,7 @@ Define **`fingerprint_blob` v1** as the **identity record**, including **L4 slot
 | **HTTP(S)** GET/HEAD to open 80/443 | `<title>`, meta tags, JSON `model` fields on admin UIs, `Server` header |
 | **TLS** client to device | Cert **subject/issuer**, SAN; optional **JA4S** fingerprint for software class |
 | **SSH** banner on 22 | OpenSSH version, vendor-branded banners |
-| **SNMP** `sysDescr` (optional, UDP 161, community `public` only with explicit opt-in) | Classic **L4** for network gear |
+| **SNMP** | **Not planned** — excluded by product decision (see §6). |
 
 **Policy:** same **rate limits / modes** as scan kindness; **HTTPS** may use **insecure skip verify** only to read cert—**never** send creds.
 
@@ -152,7 +152,7 @@ Define **`fingerprint_blob` v1** as the **identity record**, including **L4 slot
 - **SSDP/UPnP** — `**LOCATION` device XML** → **primary L4** path for many consumer devices; bare `ST` → **L2** only.
 - **mDNS** — service types → **L2–L3**; TXT/hostnames → sometimes **L4**.
 - **HTTP/S, SSH** — **L4** when banners/pages expose model/firmware.
-- **SNMP** — **sysDescr** → **L4** on network gear.
+- **SNMP** — **out of scope** for Lanternis (not implemented; not on the roadmap).
 - **DHCP** — option vectors → mostly **L2**; occasional hostname hints.
 
 ### 3.3 Practice takeaways
@@ -166,7 +166,7 @@ Define **`fingerprint_blob` v1** as the **identity record**, including **L4 slot
 ## 4. Current repo reality (baseline)
 
 - **Stored:** `raw_hints_json` (ARP MAC, SSDP `st_types`/`server`/`location`, mDNS **names + service types/TXT**), **open_ports**, and a structured **`fingerprint_blob`** JSON record.
-- **Fingerprint pass (post-scan):** derives `manufacturer/model/serial` (UPnP XML), vendor (OUI or manufacturer), **reverse DNS (PTR)** names, HTTP(S) title + **Server** headers, TLS cert names, SSH banner, plus a heuristic **`device_class`** (“kind”) fused from ports + SSDP + mDNS + PTR + web banners.
+- **Fingerprint pass (post-scan):** derives `manufacturer/model/serial` (UPnP XML), vendor (OUI or manufacturer), **reverse DNS (PTR)** names, HTTP(S) title + **Server** headers (generic servers do **not** imply OS family), TLS cert names, SSH banner, optional **raw TCP SYN/SYN+ACK** features in **`deep`** scan mode on Linux only, plus a heuristic **`device_class`** (“kind”) fused from ports + SSDP + mDNS + PTR + web banners. **OS inference** uses **tiered fusion** (strong banners vs weak stack text).
 - **UI:** host list shows **Vendor** and **Kind**; per-host detail shows the **evidence chain** and per-scan snapshot history.
 - **Rule:** still defer **pluggable packs** until **3+** heuristics prove merge shape (`TODOS.md`).
 
@@ -181,10 +181,12 @@ Define **`fingerprint_blob` v1** as the **identity record**, including **L4 slot
 
 ## 6. Explicit non-goals (near term)
 
+- **SNMP** — **never** in this project: no UDP 161 probes, no community strings, no `sysDescr` harvesting.
 - **RF / PHY** fingerprinting as core.
 - **Cloud LLM** as the primary name for a device.
 - **Full** Nmap OS DB or **full** JA4+ suite in v1.
 - **Silent** aggressive scanning without user understanding.
+- **Deep SMB / SMB2+** OS fingerprinting — deferred until IoT-oriented **basics** (honest HTTP/SSDP/mDNS/TCP fusion, UPnP) are working; current code may keep a minimal anonymous SMB1-style string when available.
 
 ---
 

@@ -11,7 +11,8 @@ import (
 )
 
 // applyFingerprints runs L1–L4 fingerprinting for hosts inside cidr (parallel, bounded).
-func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []store.Host) {
+// tcpScanMode is the scan mode (light/normal/thorough); forwarded to fingerprint.Build for probe depth.
+func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []store.Host, tcpScanMode string) {
 	client := fingerprint.DefaultHTTPClient()
 	sem := make(chan struct{}, 12)
 	var wg sync.WaitGroup
@@ -29,7 +30,7 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 			if err != nil {
 				return
 			}
-			rec, err := fingerprint.Build(ctx, h, hints, client)
+			rec, err := fingerprint.Build(ctx, h, hints, client, &fingerprint.BuildOptions{TCPProfile: tcpScanMode})
 			if err != nil {
 				return
 			}

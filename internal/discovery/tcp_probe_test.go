@@ -20,6 +20,9 @@ func TestNormalizeTCPProfile(t *testing.T) {
 	if got := NormalizeTCPProfile("THOROUGH"); got != TCPProfileThorough {
 		t.Fatalf("thorough: got %q", got)
 	}
+	if got := NormalizeTCPProfile("deep"); got != TCPProfileDeep {
+		t.Fatalf("deep: got %q", got)
+	}
 	if got := NormalizeTCPProfile("weird"); got != TCPProfileNormal {
 		t.Fatalf("unknown: got %q", got)
 	}
@@ -29,8 +32,12 @@ func TestPortsForTCPProfileTiers(t *testing.T) {
 	light := PortsForTCPProfile(TCPProfileLight)
 	normal := PortsForTCPProfile(TCPProfileNormal)
 	thorough := PortsForTCPProfile(TCPProfileThorough)
+	deep := PortsForTCPProfile(TCPProfileDeep)
 	if len(light) >= len(normal) || len(normal) >= len(thorough) {
 		t.Fatalf("expected light < normal < thorough counts, got %d %d %d", len(light), len(normal), len(thorough))
+	}
+	if len(deep) != len(thorough) {
+		t.Fatalf("deep and thorough should share port list, got %d vs %d", len(deep), len(thorough))
 	}
 	if len(dedupeStringsStable(thorough)) != len(thorough) {
 		t.Fatal("thorough list has duplicates")
