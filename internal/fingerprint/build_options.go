@@ -15,3 +15,12 @@ func tcpProfileDeep(opts *BuildOptions) bool {
 	}
 	return discovery.NormalizeTCPProfile(opts.TCPProfile) == discovery.TCPProfileDeep
 }
+
+// httpExtraPathsEnabled is true for thorough/deep: extra capped GETs to curated paths (/version, /api/status).
+func httpExtraPathsEnabled(opts *BuildOptions) bool {
+	if opts == nil {
+		return false
+	}
+	p := discovery.NormalizeTCPProfile(opts.TCPProfile)
+	return p == discovery.TCPProfileThorough || p == discovery.TCPProfileDeep
+}

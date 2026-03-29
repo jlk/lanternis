@@ -67,5 +67,31 @@ func TestFindingsFromRecordUPnPAndSSH(t *testing.T) {
 	}
 }
 
+func TestFindingsFromRecordGranularUPnP(t *testing.T) {
+	rec := &Record{
+		Manufacturer: "ACME",
+		Model:        "X",
+		Signals: []Signal{
+			{Source: "upnp_xml", Field: "manufacturer", Value: "ACME"},
+			{Source: "upnp_xml", Field: "softwareVersion", Value: "9.9.9"},
+		},
+	}
+	fs := FindingsFromRecord(rec)
+	if len(fs) < 2 {
+		t.Fatalf("expected granular UPnP findings, got %d %+v", len(fs), fs)
+	}
+}
+
+func TestFindingsFromRecordHTTPExtract(t *testing.T) {
+	js := `{"kind":"server","product":"nginx","version":"1.22.0","conf":"high","evidence":"nginx/1.22.0"}`
+	rec := &Record{
+		Signals: []Signal{{Source: "http_extract", Field: "tcp:80/http", Value: js}},
+	}
+	fs := FindingsFromRecord(rec)
+	if len(fs) != 1 || !fs[0].VulnReady || fs[0].Surface != "tcp:80/http" {
+		t.Fatalf("got %+v", fs)
+	}
+}
+
 // Compile-time check: store.Finding shape used by API.
 var _ = store.Finding{}

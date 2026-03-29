@@ -47,11 +47,16 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 			if err == nil {
 				if dev.Manufacturer != "" {
 					rec.Manufacturer = dev.Manufacturer
+					rec.Signals = append(rec.Signals, Signal{Source: "upnp_xml", Field: "manufacturer", Value: truncate(dev.Manufacturer, 120)})
 				}
 				if dev.ModelName != "" {
 					rec.Model = dev.ModelName
+					rec.Signals = append(rec.Signals, Signal{Source: "upnp_xml", Field: "modelName", Value: truncate(dev.ModelName, 120)})
 				} else if dev.ModelNumber != "" {
 					rec.Model = dev.ModelNumber
+				}
+				if dev.ModelNumber != "" {
+					rec.Signals = append(rec.Signals, Signal{Source: "upnp_xml", Field: "modelNumber", Value: truncate(dev.ModelNumber, 120)})
 				}
 				if dev.SerialNumber != "" {
 					rec.Serial = dev.SerialNumber
@@ -152,8 +157,8 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 
 	// HTTP(S) on open web ports — title, Server header, and classification keywords.
 	if ports["80"] {
-		title, server, err := FetchHTTPIndexMeta(ctx, client, "http", h.IP, "80")
-		if err == nil {
+		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "80", "http", "tcp:80/http", opts)
+		if ok {
 			pctx.HTTPTitle80 = title
 			pctx.HTTPServer80 = server
 			if title != "" {
@@ -170,8 +175,8 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 	if ports["443"] {
-		title, server, err := FetchHTTPIndexMeta(ctx, client, "https", h.IP, "443")
-		if err == nil {
+		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "443", "https", "tcp:443/https", opts)
+		if ok {
 			pctx.HTTPTitle443 = title
 			pctx.HTTPServer443 = server
 			if title != "" {
@@ -207,8 +212,8 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 
 	// Alternate web admin ports (already in TCP profiles for light+).
 	if ports["8080"] {
-		title, server, err := FetchHTTPIndexMeta(ctx, client, "http", h.IP, "8080")
-		if err == nil {
+		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "8080", "http", "tcp:8080/http", opts)
+		if ok {
 			pctx.HTTPTitle8080 = title
 			pctx.HTTPServer8080 = server
 			if title != "" {
@@ -225,8 +230,8 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 	if ports["8443"] {
-		title, server, err := FetchHTTPIndexMeta(ctx, client, "https", h.IP, "8443")
-		if err == nil {
+		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "8443", "https", "tcp:8443/https", opts)
+		if ok {
 			pctx.HTTPTitle8443 = title
 			pctx.HTTPServer8443 = server
 			if title != "" {
@@ -252,8 +257,8 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 	if ports["8888"] {
-		title, server, err := FetchHTTPIndexMeta(ctx, client, "http", h.IP, "8888")
-		if err == nil {
+		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "8888", "http", "tcp:8888/http", opts)
+		if ok {
 			pctx.HTTPTitle8888 = title
 			pctx.HTTPServer8888 = server
 			if title != "" {
@@ -328,6 +333,38 @@ func ConfidenceFor(rec *Record) string {
 	default:
 		return "unknown"
 	}
+}
+
+// appendHTTPIndexAndExtract GETs / plus optional curated paths (thorough/deep), appends http_extract signals.
+func appendHTTPIndexAndExtract(ctx context.Context, client *http.Client, rec *Record, ip, port, scheme, surface string, opts *BuildOptions) (title, server string, ok bool) {
+	title, server, body, err := FetchHTTPIndexMetaAndBody(ctx, client, scheme, ip, port)
+	if err != nil {
+		return "", "", false
+	}
+	for _, p := range ExtractHTTPVersionHints(body, server) {
+		if s := MarshalHTTPExtractPayload(p); s != "" {
+			rec.Signals = append(rec.Signals, Signal{Source: "http_extract", Field: surface, Value: s})
+		}
+	}
+	if httpExtraPathsEnabled(opts) {
+		for _, path := range []string{"/version", "/api/status"} {
+			st, b, err := FetchHTTPGETPath(ctx, client, scheme, ip, port, path, 32*1024)
+			if err != nil {
+				continue
+			}
+			if st >= 500 {
+				continue
+			}
+			hints := ExtractHTTPVersionHints(b, "")
+			for i := range hints {
+				hints[i].Path = path
+				if s := MarshalHTTPExtractPayload(hints[i]); s != "" {
+					rec.Signals = append(rec.Signals, Signal{Source: "http_extract", Field: surface, Value: s})
+				}
+			}
+		}
+	}
+	return title, server, true
 }
 
 func summarize(rec *Record) string {
