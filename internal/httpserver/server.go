@@ -68,7 +68,37 @@ func (s *Server) debugf(format string, args ...any) {
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		lw := &captureStatusWriter{ResponseWriter: w}
+		s.mux.ServeHTTP(lw, r)
+		status := lw.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		s.logger.Printf("[access] %s %s %d %s %s",
+			r.Method, r.URL.RequestURI(), status, r.RemoteAddr, time.Since(start).Truncate(time.Microsecond))
+	})
+}
+
+// captureStatusWriter records the HTTP status code for access logs.
+type captureStatusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *captureStatusWriter) WriteHeader(code int) {
+	if w.status == 0 {
+		w.status = code
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *captureStatusWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
 }
 
 func (s *Server) routes() {

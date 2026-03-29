@@ -53,6 +53,46 @@ func newTestServerWithoutFirstRun(t *testing.T) (*Server, *store.Store) {
 	return New(logger, st, discovery.NewScanner(), Config{DBPath: dbPath, Version: "test"}), st
 }
 
+func TestAccessLogLine(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	st, err := store.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = st.Close()
+		_ = os.Remove(dbPath)
+	})
+	if err := st.CompleteFirstRun(context.Background(), "10.0.0.0/30", ""); err != nil {
+		t.Fatalf("complete first run: %v", err)
+	}
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", log.LstdFlags)
+	srv := New(logger, st, discovery.NewScanner(), Config{DBPath: dbPath, Version: "test"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/csrf", nil)
+	req.RemoteAddr = "192.0.2.1:12345"
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("csrf: %d", rr.Code)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "[access]") {
+		t.Fatalf("expected [access] in log, got %q", out)
+	}
+	if !strings.Contains(out, "GET") || !strings.Contains(out, "/api/csrf") {
+		t.Fatalf("expected method and path in access log, got %q", out)
+	}
+	if !strings.Contains(out, "200") {
+		t.Fatalf("expected status 200 in access log, got %q", out)
+	}
+	if !strings.Contains(out, "192.0.2.1:12345") {
+		t.Fatalf("expected remote addr in access log, got %q", out)
+	}
+}
+
 func TestScanStartRequiresCSRF(t *testing.T) {
 	srv, _ := newTestServer(t)
 
