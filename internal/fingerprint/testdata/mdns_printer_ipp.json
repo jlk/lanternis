@@ -1,0 +1,18 @@
+{
+  "name": "mDNS IPP printer",
+  "host": { "ip": "192.168.1.50", "open_ports": [] },
+  "hints": {
+    "mdns": {
+      "names": ["hp-officejet.local"],
+      "services": [
+        { "type": "_ipp._tcp.local", "port": 631, "txt": ["ty=HP OfficeJet", "note=Office"] }
+      ]
+    }
+  },
+  "want": {
+    "device_class": "Printer or scanner",
+    "model_contains": "hp officejet",
+    "service_type": "_ipp._tcp"
+  }
+}
+

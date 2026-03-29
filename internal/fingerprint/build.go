@@ -68,6 +68,7 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 
 	// mDNS names — at least L3; treat rich hostnames as L4 model hint when empty.
 	if mdns, ok := hints["mdns"].(map[string]any); ok {
+		var mdnsNameModelCandidate string
 		if names := stringSliceFromAny(mdns["names"]); len(names) > 0 {
 			for _, n := range names {
 				n = strings.TrimSpace(n)
@@ -78,10 +79,63 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 			}
 			rec.LadderMax = maxInt(rec.LadderMax, 3)
 			first := strings.TrimSpace(names[0])
-			if rec.Model == "" && looksLikeProductToken(first) {
-				rec.Model = first
-				rec.LadderMax = maxInt(rec.LadderMax, 4)
+			if looksLikeProductToken(first) {
+				mdnsNameModelCandidate = first
 			}
+		}
+
+		// mDNS service types / TXT. These are strong L2–L3 signals and sometimes carry model strings.
+		if raw, ok := mdns["services"].([]any); ok && len(raw) > 0 {
+			seenTy := make(map[string]struct{})
+			for _, e := range raw {
+				m, ok := e.(map[string]any)
+				if !ok {
+					continue
+				}
+				ty, _ := m["type"].(string)
+				ty = strings.TrimSpace(strings.ToLower(ty))
+				if ty == "" {
+					continue
+				}
+				port := 0
+				switch x := m["port"].(type) {
+				case float64:
+					port = int(x)
+				case int:
+					port = x
+				case int64:
+					port = int(x)
+				}
+				txt := stringSliceFromAny(m["txt"])
+				pctx.MDNSServices = append(pctx.MDNSServices, MDNSServiceHint{Type: ty, Port: port, TXT: txt})
+				if _, ok := seenTy[ty]; !ok {
+					seenTy[ty] = struct{}{}
+					rec.Signals = append(rec.Signals, Signal{Source: "mdns_service", Field: "type", Value: truncate(ty, 160)})
+				}
+				if len(txt) > 0 {
+					// Only include a few compact TXT strings to avoid huge evidence.
+					for i := 0; i < len(txt) && i < 4; i++ {
+						if strings.TrimSpace(txt[i]) == "" {
+							continue
+						}
+						rec.Signals = append(rec.Signals, Signal{Source: "mdns_txt", Field: ty, Value: truncate(txt[i], 160)})
+					}
+					// Extract model-like tokens from common TXT k=v.
+					if rec.Model == "" {
+						if v := mdnsModelFromTXT(txt); v != "" {
+							rec.Model = v
+							rec.LadderMax = maxInt(rec.LadderMax, 4)
+						}
+					}
+				}
+				rec.LadderMax = maxInt(rec.LadderMax, 3)
+			}
+		}
+
+		// Apply hostname-derived model only if we still don't have a better one.
+		if rec.Model == "" && mdnsNameModelCandidate != "" {
+			rec.Model = mdnsNameModelCandidate
+			rec.LadderMax = maxInt(rec.LadderMax, 4)
 		}
 	}
 
@@ -268,4 +322,29 @@ func looksLikeProductToken(s string) bool {
 	return strings.Contains(lower, "iphone") || strings.Contains(lower, "ipad") ||
 		strings.Contains(lower, "android") || strings.Contains(lower, "samsung") ||
 		strings.Contains(lower, "windows") || strings.Contains(lower, "macbook")
+}
+
+func mdnsModelFromTXT(txt []string) string {
+	for _, t := range txt {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(t, "=")
+		if !ok {
+			continue
+		}
+		k = strings.ToLower(strings.TrimSpace(k))
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		switch k {
+		case "md", "model", "ty", "product", "device", "hw":
+			if len(v) >= 3 {
+				return truncate(v, 120)
+			}
+		}
+	}
+	return ""
 }

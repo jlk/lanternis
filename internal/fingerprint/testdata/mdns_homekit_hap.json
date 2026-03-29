@@ -1,0 +1,18 @@
+{
+  "name": "mDNS HomeKit accessory",
+  "host": { "ip": "192.168.1.60", "open_ports": [] },
+  "hints": {
+    "mdns": {
+      "names": ["bridge-1.local"],
+      "services": [
+        { "type": "_hap._tcp.local", "port": 51826, "txt": ["md=BridgeModel1", "ci=2"] }
+      ]
+    }
+  },
+  "want": {
+    "device_class": "Home automation hub",
+    "model_contains": "bridgemodel",
+    "service_type": "_hap._tcp"
+  }
+}
+

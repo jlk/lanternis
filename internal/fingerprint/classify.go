@@ -15,6 +15,13 @@ type ProbeContext struct {
 	HTTPServer443 string
 	TLSCN         string
 	SSHBanner     string
+	MDNSServices  []MDNSServiceHint
+}
+
+type MDNSServiceHint struct {
+	Type string
+	Port int
+	TXT  []string
 }
 
 // classPriority breaks ties when two buckets reach the same score (first wins).
@@ -134,6 +141,40 @@ func ClassifyDevice(rec *Record, h store.Host, hints map[string]any, p ProbeCont
 				scores["mobile"] += 2
 			case strings.Contains(nl, "hap._tcp"), strings.Contains(nl, "homekit"):
 				scores["home_automation"] += 2
+			}
+		}
+	}
+
+	// --- mDNS service types / TXT ---
+	for _, s := range p.MDNSServices {
+		ty := strings.ToLower(strings.TrimSpace(s.Type))
+		if ty == "" {
+			continue
+		}
+		switch {
+		case strings.Contains(ty, "_ipp._tcp"), strings.Contains(ty, "_printer._tcp"), strings.Contains(ty, "_pdl-datastream._tcp"):
+			scores["printer"] += 6
+		case strings.Contains(ty, "_hap._tcp"):
+			scores["home_automation"] += 5
+		case strings.Contains(ty, "_googlecast._tcp"), strings.Contains(ty, "_airplay._tcp"):
+			scores["media"] += 6
+		case strings.Contains(ty, "_raop._tcp"), strings.Contains(ty, "_sonos._tcp"):
+			scores["audio"] += 6
+		case strings.Contains(ty, "_smb._tcp"), strings.Contains(ty, "_workstation._tcp"):
+			scores["computer"] += 3
+			scores["nas"] += 1
+		}
+		if len(s.TXT) > 0 {
+			txt := strings.ToLower(strings.Join(s.TXT, " "))
+			if strings.Contains(txt, "home-assistant") || strings.Contains(txt, "hass") {
+				scores["home_automation"] += 3
+			}
+			if strings.Contains(txt, "chromecast") || strings.Contains(txt, "googlecast") {
+				scores["media"] += 2
+			}
+			if strings.Contains(txt, "airplay") {
+				scores["media"] += 1
+				scores["audio"] += 1
 			}
 		}
 	}
