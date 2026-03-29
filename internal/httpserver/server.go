@@ -139,7 +139,11 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     details.panel { padding: 10px 12px; }
     details.panel summary { cursor: pointer; font-weight: 600; margin: -4px 0 8px 0; }
     details.panel ul { margin: 0; padding-left: 1.25rem; color: var(--ln-muted); font-size: 14px; line-height: 1.5; }
-    .table-toolbar { justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .table-toolbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .column-picker { font-size: 13px; color: var(--ln-muted); }
+    .column-picker summary { cursor: pointer; font-weight: 600; color: var(--ln-text); list-style: none; }
+    .column-picker summary::-webkit-details-marker { display: none; }
+    .column-picker .column-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 12px; margin-top: 8px; padding: 10px; border: 1px solid var(--ln-border); border-radius: 4px; background: var(--ln-surface); max-width: 520px; }
     caption { caption-side: top; text-align: left; font-size: 13px; color: var(--ln-muted); padding: 0 0 8px 0; }
     #hostsTable tbody tr.host-row { cursor: pointer; }
     #hostsTable tbody tr.host-row:hover { background: color-mix(in srgb, var(--ln-accent) 8%, transparent); }
@@ -255,10 +259,14 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     <section class="panel">
       <div class="controls table-toolbar">
         <label class="setup-check" style="margin:0;"><input type="checkbox" id="hideUnknownReach" checked /> Hide unknown reachability</label>
+        <details class="column-picker">
+          <summary>Table columns</summary>
+          <div class="column-check-grid" id="hostColumnPicker" aria-label="Choose visible columns"></div>
+        </details>
         <span id="hostCount" class="muted" aria-live="polite"></span>
       </div>
       <table id="hostsTable">
-        <caption>Devices seen on your LAN for this database. Sort columns by clicking headers. <strong>Click a row</strong> for fingerprint evidence, raw hints, and per-scan history.</caption>
+        <caption>Devices on your LAN for this database. Sort by clicking headers. Choose columns with <strong>Table columns</strong>. <strong>Click a row</strong> for evidence and scan history.</caption>
         <thead>
           <tr>
             <th data-col="ip" role="button" tabindex="0" title="Sort by IP">IP</th>
@@ -307,16 +315,121 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const STORAGE_THEME = "ln_theme";
     const STORAGE_PORT_DISMISS = "ln_port_banner_dismiss_scan_id";
     const STORAGE_PORT_SNOOZE = "ln_port_banner_snooze_until";
+    const STORAGE_HOST_TABLE_COLS = "ln_host_table_columns_v1";
+    const HOST_TABLE_COLS = [
+      { id: "ip", label: "IP", locked: true },
+      { id: "reachability", label: "Reachability" },
+      { id: "open_ports", label: "Open ports" },
+      { id: "vendor", label: "Vendor" },
+      { id: "device_class", label: "Kind" },
+      { id: "label", label: "Label" },
+      { id: "confidence", label: "Confidence" },
+      { id: "last_seen", label: "Last seen" },
+      { id: "hints", label: "Hints" },
+    ];
     const scanRunsBody = document.getElementById("scanRunsBody");
     const portBannerSnooze = document.getElementById("portBannerSnooze");
     const hostDetailOverlay = document.getElementById("hostDetailOverlay");
     const hostDetailTitle = document.getElementById("hostDetailTitle");
     const hostDetailContent = document.getElementById("hostDetailContent");
     const hostDetailClose = document.getElementById("hostDetailClose");
+    const hostColumnPicker = document.getElementById("hostColumnPicker");
 
     let currentHosts = [];
     let sort = { col: "ip", dir: "asc" };
     let setupDone = false;
+
+    function defaultHostColVisibility() {
+      const out = {};
+      for (const c of HOST_TABLE_COLS) {
+        if (c.locked) {
+          continue;
+        }
+        out[c.id] = true;
+      }
+      return out;
+    }
+
+    function loadHostColVisibility() {
+      try {
+        const raw = localStorage.getItem(STORAGE_HOST_TABLE_COLS);
+        if (!raw) {
+          return defaultHostColVisibility();
+        }
+        const o = JSON.parse(raw);
+        const d = defaultHostColVisibility();
+        if (o && typeof o === "object") {
+          for (const k of Object.keys(d)) {
+            if (typeof o[k] === "boolean") {
+              d[k] = o[k];
+            }
+          }
+        }
+        return d;
+      } catch (e) {
+        return defaultHostColVisibility();
+      }
+    }
+
+    function saveHostColVisibility() {
+      try {
+        localStorage.setItem(STORAGE_HOST_TABLE_COLS, JSON.stringify(hostColVisibility));
+      } catch (e) {}
+    }
+
+    let hostColVisibility = loadHostColVisibility();
+
+    function hostColVisible(id) {
+      if (id === "ip") {
+        return true;
+      }
+      return hostColVisibility[id] !== false;
+    }
+
+    function visibleHostTableColCount() {
+      let n = 0;
+      for (const c of HOST_TABLE_COLS) {
+        if (hostColVisible(c.id)) {
+          n++;
+        }
+      }
+      return n;
+    }
+
+    function applyHostTableHeaderVisibility() {
+      for (const th of tableHeaders) {
+        const col = th.getAttribute("data-col");
+        th.style.display = hostColVisible(col) ? "" : "none";
+      }
+    }
+
+    function initHostColumnPicker() {
+      if (!hostColumnPicker) {
+        return;
+      }
+      hostColumnPicker.innerHTML = "";
+      for (const c of HOST_TABLE_COLS) {
+        if (c.locked) {
+          continue;
+        }
+        const lab = document.createElement("label");
+        lab.className = "setup-check";
+        lab.style.margin = "0";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = hostColVisible(c.id);
+        cb.addEventListener("change", () => {
+          hostColVisibility[c.id] = cb.checked;
+          saveHostColVisibility();
+          applyHostTableHeaderVisibility();
+          updateHeaderIndicators();
+          renderHosts();
+        });
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(" " + c.label));
+        hostColumnPicker.appendChild(lab);
+      }
+    }
 
     const modeHints = {
       light: "Light: 12 parallel host probes + smallest TCP port set (web).",
@@ -540,16 +653,17 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         ? (currentHosts || []).filter(isUnknownReachability).length
         : 0;
       hostsBody.innerHTML = "";
+      const colSpan = String(visibleHostTableColCount());
       if (!total) {
         hostCount.textContent = "";
-        hostsBody.innerHTML = "<tr><td colspan='9' class='muted'>Nothing here yet. Run a first scan.</td></tr>";
+        hostsBody.innerHTML = "<tr><td colspan=\"" + colSpan + "\" class='muted'>Nothing here yet. Run a first scan.</td></tr>";
         return;
       }
       if (!rows.length) {
         if (hideUnknownReach.checked && hiddenUnknown > 0) {
-          hostsBody.innerHTML = "<tr><td colspan='9' class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
+          hostsBody.innerHTML = "<tr><td colspan=\"" + colSpan + "\" class='muted'>Every row is hidden: all addresses have unknown reachability with the current probe. Uncheck &quot;Hide unknown reachability&quot; to see them.</td></tr>";
         } else {
-          hostsBody.innerHTML = "<tr><td colspan='9' class='muted'>No rows to show.</td></tr>";
+          hostsBody.innerHTML = "<tr><td colspan=\"" + colSpan + "\" class='muted'>No rows to show.</td></tr>";
         }
         hostCount.textContent = "Showing 0 of " + total + (hiddenUnknown ? " (" + hiddenUnknown + " hidden)" : "");
         return;
@@ -564,16 +678,35 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         tr.setAttribute("title", "Show device details");
         const vend = String(h.vendor || "").trim();
         const kind = String(h.device_class || "").trim();
-        tr.innerHTML =
-          "<td class='num'>" + (h.ip || "") + "</td>" +
-          "<td>" + (h.reachability || "unknown") + "</td>" +
-          "<td class='muted num'>" + (Array.isArray(h.open_ports) && h.open_ports.length ? h.open_ports.join(", ") : "—") + "</td>" +
-          "<td class='muted'>" + (vend ? esc(vend) : "—") + "</td>" +
-          "<td class='muted'>" + (kind ? esc(kind) : "—") + "</td>" +
-          "<td>" + (h.label || "Unknown") + "</td>" +
-          "<td>" + (h.confidence || "unknown") + "</td>" +
-          "<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>" +
-          "<td class='muted'>" + hintSummary(h) + "</td>";
+        const cells = [];
+        if (hostColVisible("ip")) {
+          cells.push("<td class='num'>" + (h.ip || "") + "</td>");
+        }
+        if (hostColVisible("reachability")) {
+          cells.push("<td>" + (h.reachability || "unknown") + "</td>");
+        }
+        if (hostColVisible("open_ports")) {
+          cells.push("<td class='muted num'>" + (Array.isArray(h.open_ports) && h.open_ports.length ? h.open_ports.join(", ") : "—") + "</td>");
+        }
+        if (hostColVisible("vendor")) {
+          cells.push("<td class='muted'>" + (vend ? esc(vend) : "—") + "</td>");
+        }
+        if (hostColVisible("device_class")) {
+          cells.push("<td class='muted'>" + (kind ? esc(kind) : "—") + "</td>");
+        }
+        if (hostColVisible("label")) {
+          cells.push("<td>" + (h.label || "Unknown") + "</td>");
+        }
+        if (hostColVisible("confidence")) {
+          cells.push("<td>" + (h.confidence || "unknown") + "</td>");
+        }
+        if (hostColVisible("last_seen")) {
+          cells.push("<td>" + (h.last_seen ? new Date(h.last_seen).toLocaleString() : "") + "</td>");
+        }
+        if (hostColVisible("hints")) {
+          cells.push("<td class='muted'>" + hintSummary(h) + "</td>");
+        }
+        tr.innerHTML = cells.join("");
         hostsBody.appendChild(tr);
       }
     }
@@ -782,12 +915,13 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     function updateHeaderIndicators() {
       for (const th of tableHeaders) {
         const col = th.getAttribute("data-col");
+        if (!th.dataset.sortTitle) {
+          th.dataset.sortTitle = th.textContent.replace(/ [▲▼]$/, "").trim();
+        }
+        const base = th.dataset.sortTitle || "";
         const active = col === sort.col;
         th.setAttribute("aria-sort", active ? (sort.dir === "asc" ? "ascending" : "descending") : "none");
-        th.textContent = th.textContent.replace(/ [▲▼]$/, "");
-        if (active) {
-          th.textContent = th.textContent + (sort.dir === "asc" ? " ▲" : " ▼");
-        }
+        th.textContent = base + (active ? (sort.dir === "asc" ? " ▲" : " ▼") : "");
       }
     }
 
@@ -1049,6 +1183,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         await loadSetupStatus();
         refreshModeHint();
         await loadRuntime();
+        initHostColumnPicker();
+        applyHostTableHeaderVisibility();
         updateHeaderIndicators();
         await tick();
         setInterval(tick, 1500);
