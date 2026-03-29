@@ -26,7 +26,7 @@ func TestDisplayLabelPTRWhenNoMDNSName(t *testing.T) {
 	rec := &Record{
 		Signals: []Signal{{Source: "ptr", Field: "name", Value: "router.lan"}},
 	}
-	if got := DisplayLabel(rec, map[string]any{}, ip); got != "router.lan" {
+	if got := DisplayLabel(rec, map[string]any{}, ip); got != "router" {
 		t.Fatalf("ptr: got %q", got)
 	}
 }

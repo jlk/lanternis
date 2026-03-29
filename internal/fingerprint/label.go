@@ -263,5 +263,13 @@ func cleanPTRLabel(ptr string, ip string) string {
 	if labelLooksLikeIP(ptr, ip) {
 		return ""
 	}
+	// Prefer short hostnames (left-most label) for display.
+	// Example: sw04.mercer.jlk.dev -> sw04
+	if i := strings.IndexByte(ptr, '.'); i > 0 {
+		short := strings.TrimSpace(ptr[:i])
+		if short != "" && !labelLooksLikeIP(short, ip) {
+			return short
+		}
+	}
 	return ptr
 }
