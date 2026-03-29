@@ -22,7 +22,7 @@ type Record struct {
 
 // Signal is one piece of evidence backing the record.
 type Signal struct {
-	Source string `json:"source"` // oui, upnp_xml, http_title, http_server, tls_cert, ssh_banner, mdns_name, ptr, ssdp_st, device_class
+	Source string `json:"source"` // oui, upnp_xml, http_title, http_server, tls_cert, ssh_banner, mdns_name, ptr, ssdp_st, ssdp_server, device_class, mdns_txt
 	Field  string `json:"field,omitempty"`
 	Value  string `json:"value,omitempty"`
 }

@@ -8,14 +8,21 @@ import (
 
 // ProbeContext carries active probe strings used only for classification (not full signal list).
 type ProbeContext struct {
-	PTRNames      []string
-	HTTPTitle80   string
-	HTTPServer80  string
-	HTTPTitle443  string
-	HTTPServer443 string
-	TLSCN         string
-	SSHBanner     string
-	MDNSServices  []MDNSServiceHint
+	PTRNames       []string
+	HTTPTitle80    string
+	HTTPServer80   string
+	HTTPTitle443   string
+	HTTPServer443  string
+	HTTPTitle8080  string
+	HTTPServer8080 string
+	HTTPTitle8443  string
+	HTTPServer8443 string
+	HTTPTitle8888  string
+	HTTPServer8888 string
+	TLSCN          string
+	TLSCN8443      string
+	SSHBanner      string
+	MDNSServices   []MDNSServiceHint
 }
 
 type MDNSServiceHint struct {
@@ -58,8 +65,10 @@ func ClassifyDevice(rec *Record, h store.Host, hints map[string]any, p ProbeCont
 
 	httpBlob := strings.ToLower(strings.Join([]string{
 		p.HTTPTitle80, p.HTTPServer80, p.HTTPTitle443, p.HTTPServer443,
+		p.HTTPTitle8080, p.HTTPServer8080, p.HTTPTitle8443, p.HTTPServer8443,
+		p.HTTPTitle8888, p.HTTPServer8888,
 	}, " "))
-	tlsSSH := strings.ToLower(p.TLSCN + " " + p.SSHBanner)
+	tlsSSH := strings.ToLower(p.TLSCN + " " + p.TLSCN8443 + " " + p.SSHBanner)
 	if strings.Contains(tlsSSH, "openssh") {
 		scores["server"] += 1
 	}

@@ -55,6 +55,14 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 				if dev.SerialNumber != "" {
 					rec.Serial = dev.SerialNumber
 				}
+				if dev.SoftwareVersion != "" {
+					rec.FirmwareVersion = dev.SoftwareVersion
+					rec.Signals = append(rec.Signals, Signal{Source: "upnp_xml", Field: "softwareVersion", Value: truncate(dev.SoftwareVersion, 120)})
+					rec.LadderMax = maxInt(rec.LadderMax, 3)
+				}
+				if dev.ModelDescription != "" {
+					rec.Signals = append(rec.Signals, Signal{Source: "upnp_xml", Field: "modelDescription", Value: truncate(dev.ModelDescription, 240)})
+				}
 				rec.Signals = append(rec.Signals, Signal{Source: "upnp_xml", Field: "location", Value: truncate(loc, 120)})
 				if dev.Manufacturer != "" || dev.ModelName != "" || dev.ModelNumber != "" {
 					rec.LadderMax = maxInt(rec.LadderMax, 4)
@@ -196,6 +204,71 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 
+	// Alternate web admin ports (already in TCP profiles for light+).
+	if ports["8080"] {
+		title, server, err := FetchHTTPIndexMeta(ctx, client, "http", h.IP, "8080")
+		if err == nil {
+			pctx.HTTPTitle8080 = title
+			pctx.HTTPServer8080 = server
+			if title != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "http_title", Field: "title_8080", Value: truncate(title, 200)})
+				if needProbe && rec.Model == "" {
+					rec.Model = title
+				}
+				rec.LadderMax = maxInt(rec.LadderMax, 4)
+			}
+			if server != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "http_server", Field: "server_8080", Value: truncate(server, 200)})
+				rec.LadderMax = maxInt(rec.LadderMax, 3)
+			}
+		}
+	}
+	if ports["8443"] {
+		title, server, err := FetchHTTPIndexMeta(ctx, client, "https", h.IP, "8443")
+		if err == nil {
+			pctx.HTTPTitle8443 = title
+			pctx.HTTPServer8443 = server
+			if title != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "http_title", Field: "title_8443", Value: truncate(title, 200)})
+				if needProbe && rec.Model == "" {
+					rec.Model = title
+				}
+				rec.LadderMax = maxInt(rec.LadderMax, 4)
+			}
+			if server != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "http_server", Field: "server_8443", Value: truncate(server, 200)})
+				rec.LadderMax = maxInt(rec.LadderMax, 3)
+			}
+		}
+		cn, err := TLSCertNames(ctx, h.IP, "8443")
+		if err == nil && cn != "" {
+			pctx.TLSCN8443 = cn
+			rec.Signals = append(rec.Signals, Signal{Source: "tls_cert", Field: "dns_or_cn_8443", Value: truncate(cn, 200)})
+			rec.LadderMax = maxInt(rec.LadderMax, 4)
+			if needProbe && rec.Model == "" {
+				rec.Model = cn
+			}
+		}
+	}
+	if ports["8888"] {
+		title, server, err := FetchHTTPIndexMeta(ctx, client, "http", h.IP, "8888")
+		if err == nil {
+			pctx.HTTPTitle8888 = title
+			pctx.HTTPServer8888 = server
+			if title != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "http_title", Field: "title_8888", Value: truncate(title, 200)})
+				if needProbe && rec.Model == "" {
+					rec.Model = title
+				}
+				rec.LadderMax = maxInt(rec.LadderMax, 4)
+			}
+			if server != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "http_server", Field: "server_8888", Value: truncate(server, 200)})
+				rec.LadderMax = maxInt(rec.LadderMax, 3)
+			}
+		}
+	}
+
 	ClassifyDevice(rec, h, hints, pctx)
 
 	rec.Summary = summarize(rec)
@@ -241,6 +314,12 @@ func summarize(rec *Record) string {
 	}
 	if rec.Model != "" {
 		return strings.TrimSpace(rec.Model)
+	}
+	if rec.Manufacturer != "" && rec.FirmwareVersion != "" {
+		return strings.TrimSpace(rec.Manufacturer + " (" + rec.FirmwareVersion + ")")
+	}
+	if rec.FirmwareVersion != "" {
+		return strings.TrimSpace(rec.FirmwareVersion)
 	}
 	if rec.Manufacturer != "" {
 		return strings.TrimSpace(rec.Manufacturer)

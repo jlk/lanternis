@@ -11,20 +11,25 @@ import (
 )
 
 var (
-	reManufacturer = regexp.MustCompile(`(?i)<manufacturer[^>]*>([^<]*)</manufacturer>`)
-	reModelName    = regexp.MustCompile(`(?i)<modelName[^>]*>([^<]*)</modelName>`)
-	reModelNumber  = regexp.MustCompile(`(?i)<modelNumber[^>]*>([^<]*)</modelNumber>`)
-	reFriendlyName = regexp.MustCompile(`(?i)<friendlyName[^>]*>([^<]*)</friendlyName>`)
-	reSerial       = regexp.MustCompile(`(?i)<serialNumber[^>]*>([^<]*)</serialNumber>`)
+	reManufacturer     = regexp.MustCompile(`(?i)<manufacturer[^>]*>([^<]*)</manufacturer>`)
+	reModelName        = regexp.MustCompile(`(?i)<modelName[^>]*>([^<]*)</modelName>`)
+	reModelNumber      = regexp.MustCompile(`(?i)<modelNumber[^>]*>([^<]*)</modelNumber>`)
+	reFriendlyName     = regexp.MustCompile(`(?i)<friendlyName[^>]*>([^<]*)</friendlyName>`)
+	reSerial           = regexp.MustCompile(`(?i)<serialNumber[^>]*>([^<]*)</serialNumber>`)
+	reModelDescription = regexp.MustCompile(`(?i)<modelDescription[^>]*>([^<]*)</modelDescription>`)
+	reSoftwareVersion  = regexp.MustCompile(`(?i)<softwareVersion[^>]*>([^<]*)</softwareVersion>`)
+	reFirmwareVersion  = regexp.MustCompile(`(?i)<firmwareVersion[^>]*>([^<]*)</firmwareVersion>`)
 )
 
 // UPnPDevice holds fields extracted from a device description document.
 type UPnPDevice struct {
-	Manufacturer string
-	ModelName    string
-	ModelNumber  string
-	FriendlyName string
-	SerialNumber string
+	Manufacturer     string
+	ModelName        string
+	ModelNumber      string
+	FriendlyName     string
+	SerialNumber     string
+	ModelDescription string // long human text; useful for evidence + weak model hints
+	SoftwareVersion  string // often maps to rec.FirmwareVersion (softwareVersion / firmwareVersion tags)
 }
 
 type xmlRoot struct {
@@ -32,11 +37,14 @@ type xmlRoot struct {
 }
 
 type upnpXMLDevice struct {
-	Manufacturer string `xml:"manufacturer"`
-	ModelName    string `xml:"modelName"`
-	ModelNumber  string `xml:"modelNumber"`
-	FriendlyName string `xml:"friendlyName"`
-	SerialNumber string `xml:"serialNumber"`
+	Manufacturer     string `xml:"manufacturer"`
+	ModelName        string `xml:"modelName"`
+	ModelNumber      string `xml:"modelNumber"`
+	FriendlyName     string `xml:"friendlyName"`
+	SerialNumber     string `xml:"serialNumber"`
+	ModelDescription string `xml:"modelDescription"`
+	SoftwareVersion  string `xml:"softwareVersion"`
+	FirmwareVersion  string `xml:"firmwareVersion"`
 }
 
 // FetchUPnPDeviceDescription GETs locationURL (typically from SSDP) and parses device fields.
@@ -70,22 +78,52 @@ func FetchUPnPDeviceDescription(ctx context.Context, client *http.Client, locati
 
 func parseUPnPDescription(xmlBytes []byte) UPnPDevice {
 	var root xmlRoot
-	if err := xml.Unmarshal(xmlBytes, &root); err == nil && (root.Device.Manufacturer != "" || root.Device.ModelName != "") {
-		return UPnPDevice{
-			Manufacturer: strings.TrimSpace(root.Device.Manufacturer),
-			ModelName:    strings.TrimSpace(root.Device.ModelName),
-			ModelNumber:  strings.TrimSpace(root.Device.ModelNumber),
-			FriendlyName: strings.TrimSpace(root.Device.FriendlyName),
-			SerialNumber: strings.TrimSpace(root.Device.SerialNumber),
-		}
+	if err := xml.Unmarshal(xmlBytes, &root); err == nil && (root.Device.Manufacturer != "" || root.Device.ModelName != "" ||
+		root.Device.FriendlyName != "" || root.Device.ModelDescription != "" ||
+		root.Device.SoftwareVersion != "" || root.Device.FirmwareVersion != "") {
+		return normalizeUPnPDevice(UPnPDevice{
+			Manufacturer:     strings.TrimSpace(root.Device.Manufacturer),
+			ModelName:        strings.TrimSpace(root.Device.ModelName),
+			ModelNumber:      strings.TrimSpace(root.Device.ModelNumber),
+			FriendlyName:     strings.TrimSpace(root.Device.FriendlyName),
+			SerialNumber:     strings.TrimSpace(root.Device.SerialNumber),
+			ModelDescription: strings.TrimSpace(root.Device.ModelDescription),
+			SoftwareVersion: firstNonEmptyTrim(
+				strings.TrimSpace(root.Device.SoftwareVersion),
+				strings.TrimSpace(root.Device.FirmwareVersion),
+			),
+		})
 	}
 	// Namespace-quirky or partial XML: regex fallback.
 	d := UPnPDevice{
-		Manufacturer: firstSubmatch(reManufacturer, xmlBytes),
-		ModelName:    firstSubmatch(reModelName, xmlBytes),
-		ModelNumber:  firstSubmatch(reModelNumber, xmlBytes),
-		FriendlyName: firstSubmatch(reFriendlyName, xmlBytes),
-		SerialNumber: firstSubmatch(reSerial, xmlBytes),
+		Manufacturer:     firstSubmatch(reManufacturer, xmlBytes),
+		ModelName:        firstSubmatch(reModelName, xmlBytes),
+		ModelNumber:      firstSubmatch(reModelNumber, xmlBytes),
+		FriendlyName:     firstSubmatch(reFriendlyName, xmlBytes),
+		SerialNumber:     firstSubmatch(reSerial, xmlBytes),
+		ModelDescription: firstSubmatch(reModelDescription, xmlBytes),
+		SoftwareVersion: firstNonEmptyTrim(
+			firstSubmatch(reSoftwareVersion, xmlBytes),
+			firstSubmatch(reFirmwareVersion, xmlBytes),
+		),
+	}
+	return normalizeUPnPDevice(d)
+}
+
+func firstNonEmptyTrim(a, b string) string {
+	a = strings.TrimSpace(a)
+	if a != "" {
+		return a
+	}
+	return strings.TrimSpace(b)
+}
+
+func normalizeUPnPDevice(d UPnPDevice) UPnPDevice {
+	if len(d.ModelDescription) > 400 {
+		d.ModelDescription = d.ModelDescription[:397] + "…"
+	}
+	if len(d.SoftwareVersion) > 120 {
+		d.SoftwareVersion = d.SoftwareVersion[:117] + "…"
 	}
 	return d
 }
