@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jlk/lanternis/internal/discovery"
+	"github.com/jlk/lanternis/internal/fingerprint"
 	"github.com/jlk/lanternis/internal/store"
 )
 
@@ -442,10 +443,17 @@ func TestHostDetailAPI(t *testing.T) {
 			Vendor string `json:"vendor"`
 		} `json:"host"`
 		Findings    []store.Finding              `json:"findings"`
+		Inferences  []fingerprint.NameInference  `json:"inferences"`
 		ScanHistory []store.HostScanHistoryEntry `json:"scan_history"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
+	}
+	if out.Inferences == nil {
+		t.Fatal("expected inferences key present (may be empty slice)")
+	}
+	if len(out.Inferences) != 0 {
+		t.Fatalf("expected no inferences for fixture host, got %d", len(out.Inferences))
 	}
 	if out.Findings == nil {
 		t.Fatal("expected findings key present (may be empty slice)")

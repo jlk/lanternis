@@ -306,6 +306,7 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 	if rec.LadderMax == 0 && len(rec.Signals) == 0 {
 		return nil, nil
 	}
+	ApplyNameInferences(rec, hints, optsDeviceAliases(opts))
 	return rec, nil
 }
 

@@ -30,6 +30,27 @@ go build -o lanternis ./cmd/lanternis
 ./lanternis
 ```
 
+### Optional: `device_aliases.json` (name hints)
+
+Place a file named **`device_aliases.json`** in the **same directory as your SQLite database** (the path you pass to `-db`, default `lanternis.db` in the current working directory). On startup the server loads it; malformed JSON is logged and user aliases are skipped.
+
+Example:
+
+```json
+{
+  "hostname_substrings": {
+    "living-room-tv": "Living room Chromecast",
+    "kitchen-plug": "Meross kitchen outlet"
+  },
+  "mac_prefixes": {
+    "aa:bb:cc": "Office switch (user label)"
+  }
+}
+
+```
+
+Matching is case-insensitive for hostnames; MAC prefixes are normalized (`:` separators, lower case). These labels appear under **Name hints** on the host detail panel and in **`GET /api/host`** as `inferences`—they do **not** replace the main inventory label.
+
 ## License
 
 [MIT](LICENSE)

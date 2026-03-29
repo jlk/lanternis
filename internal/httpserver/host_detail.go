@@ -59,9 +59,14 @@ func (s *Server) handleHostDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	inferences := fingerprint.InferencesFromFingerprintBlob(host.Fingerprint)
+	if inferences == nil {
+		inferences = []fingerprint.NameInference{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"host":         newHostJSON(*host),
 		"findings":     findings,
+		"inferences":   inferences,
 		"scan_history": hist,
 	})
 }

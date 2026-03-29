@@ -24,6 +24,9 @@ type Record struct {
 
 	Signals []Signal `json:"signals,omitempty"`
 	Summary string   `json:"summary,omitempty"`
+
+	// Inferences are name-based or user-alias hypotheses (not evidence-grade product proof).
+	Inferences []NameInference `json:"inferences,omitempty"`
 }
 
 // Signal is one piece of evidence backing the record.

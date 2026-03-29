@@ -17,17 +17,19 @@ import (
 	"github.com/jlk/lanternis/internal/audit"
 	"github.com/jlk/lanternis/internal/discovery"
 	"github.com/jlk/lanternis/internal/discovery/passive"
+	"github.com/jlk/lanternis/internal/fingerprint"
 	"github.com/jlk/lanternis/internal/store"
 )
 
 type Server struct {
-	logger  *log.Logger
-	store   *store.Store
-	scanner *discovery.Scanner
-	mux     *http.ServeMux
-	dbPath  string
-	version string
-	debug   bool
+	logger        *log.Logger
+	store         *store.Store
+	scanner       *discovery.Scanner
+	mux           *http.ServeMux
+	dbPath        string
+	version       string
+	debug         bool
+	deviceAliases *fingerprint.DeviceAliasesFile
 }
 
 // Config is optional metadata for diagnostics and the UI.
@@ -42,14 +44,25 @@ func New(logger *log.Logger, st *store.Store, scanner *discovery.Scanner, cfg Co
 	if v == "" {
 		v = "dev"
 	}
+	emptyAliases := &fingerprint.DeviceAliasesFile{
+		HostnameSubstrings: map[string]string{},
+		MacPrefixes:        map[string]string{},
+	}
+	aliasPath := fingerprint.AliasesPathNextToDB(cfg.DBPath)
+	aliases, err := fingerprint.LoadDeviceAliases(aliasPath)
+	if err != nil {
+		logger.Printf("device_aliases.json: %v (no user aliases loaded)", err)
+		aliases = emptyAliases
+	}
 	s := &Server{
-		logger:  logger,
-		store:   st,
-		scanner: scanner,
-		mux:     http.NewServeMux(),
-		dbPath:  cfg.DBPath,
-		version: v,
-		debug:   cfg.Debug,
+		logger:        logger,
+		store:         st,
+		scanner:       scanner,
+		mux:           http.NewServeMux(),
+		dbPath:        cfg.DBPath,
+		version:       v,
+		debug:         cfg.Debug,
+		deviceAliases: aliases,
 	}
 	s.routes()
 	if cfg.Debug {
@@ -877,6 +890,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       const h = d.host;
       const hist = d.scan_history || [];
       const findings = d.findings || [];
+      const inferences = d.inferences || [];
       const fp = h.fingerprint || null;
       const vendorDisp = String(h.vendor || "").trim();
       let fpHtml = "<p class='muted'>No fingerprint record yet. After a scan completes, we store merged evidence: passive ARP / SSDP / mDNS, reverse DNS (PTR), UPnP device XML when available, OUI, HTTP(S) title and Server headers, TLS cert names, SSH banners, and (when ports are open) anonymous SMB strings and an RDP negotiation peek. <strong>Deep</strong> scan mode on Linux may add a raw SYN/SYN+ACK TCP fingerprint if the process has permission — not SNMP.</p>";
@@ -998,6 +1012,16 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         }
         findingsHtml += "</tbody></table>";
       }
+      let inferHtml = "<p class='muted' style='margin:0;'>No name-based suggestions yet. After a scan, local rules or your <code>device_aliases.json</code> (next to the database) may add hints from hostnames—never a substitute for protocol evidence.</p>";
+      if (inferences.length) {
+        inferHtml = "<ul style='margin:0;padding-left:1.2rem;font-size:14px;line-height:1.5;'>";
+        for (let ii = 0; ii < inferences.length; ii++) {
+          const n = inferences[ii];
+          const meta = "<span class='muted' style='font-size:12px;'>(" + esc(n.source || "") + " · " + esc(n.confidence || "") + (n.input ? " · matched <code>" + esc(n.input) + "</code>" : "") + ")</span>";
+          inferHtml += "<li style='margin-bottom:8px;'>" + esc(n.text || "") + " " + meta + "</li>";
+        }
+        inferHtml += "</ul>";
+      }
       hostDetailContent.innerHTML =
         "<section class='host-detail-section'><h3>Address</h3><p style='margin:0;'><code>" + esc(h.ip || "") + "</code></p></section>" +
         "<section class='host-detail-section'><h3>Open ports</h3>" +
@@ -1009,6 +1033,8 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         "<p style='margin:0 0 8px 0;'>Vendor " + vendorLine + "</p>" +
         "<p style='margin:0;'>Reachability <strong>" + esc(h.reachability || "unknown") + "</strong> · Confidence <strong>" + esc(h.confidence || "unknown") + "</strong> · Last seen " +
         (h.last_seen ? fmtDetailTime(h.last_seen) : "—") + "</p></section>" +
+        "<section class='host-detail-section'><h3>Name hints</h3><p class='muted' style='margin:0 0 10px 0;font-size:13px;'>Guesses from hostnames and optional user aliases—<strong>not</strong> verified like UPnP or TLS. Does not change the inventory label.</p>" +
+        inferHtml + "</section>" +
         "<section class='host-detail-section'><h3>Findings</h3><p class='muted' style='margin:0 0 10px 0;font-size:13px;'>Per-surface software identity for vulnerability-oriented review (not the same as display label).</p>" +
         findingsHtml + "</section>" +
         "<section class='host-detail-section'><h3>Fingerprint reasoning</h3>" + fpHtml + "</section>" +

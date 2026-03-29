@@ -30,7 +30,10 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 			if err != nil {
 				return
 			}
-			rec, err := fingerprint.Build(ctx, h, hints, client, &fingerprint.BuildOptions{TCPProfile: tcpScanMode})
+			rec, err := fingerprint.Build(ctx, h, hints, client, &fingerprint.BuildOptions{
+				TCPProfile:    tcpScanMode,
+				DeviceAliases: s.deviceAliases,
+			})
 			if err != nil {
 				return
 			}
