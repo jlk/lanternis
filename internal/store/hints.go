@@ -42,6 +42,9 @@ func HintsIndicatePassivePresence(m map[string]any) bool {
 		if hintStringSliceNonEmpty(mdns, "names") {
 			return true
 		}
+		if hintAnySliceNonEmpty(mdns, "services") {
+			return true
+		}
 	}
 	if ssdp, ok := m["ssdp"].(map[string]any); ok {
 		if hintStringSliceNonEmpty(ssdp, "st_types") || hintStringSliceNonEmpty(ssdp, "usns") {
@@ -66,6 +69,19 @@ func hintStringSliceNonEmpty(m map[string]any, key string) bool {
 	case []any:
 		return len(x) > 0
 	case []string:
+		return len(x) > 0
+	default:
+		return false
+	}
+}
+
+func hintAnySliceNonEmpty(m map[string]any, key string) bool {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return false
+	}
+	switch x := v.(type) {
+	case []any:
 		return len(x) > 0
 	default:
 		return false

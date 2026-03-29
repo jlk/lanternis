@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,10 +13,19 @@ import (
 
 const defaultMDNSListen = 3500 * time.Millisecond
 
-// MDNSEntry aggregates mDNS hostnames seen for one IPv4 address during a collect window.
+// MDNSService represents a service announcement tied to one address during a collect window.
+type MDNSService struct {
+	Type     string   `json:"type"`
+	Instance string   `json:"instance,omitempty"`
+	Port     int      `json:"port,omitempty"`
+	TXT      []string `json:"txt,omitempty"`
+}
+
+// MDNSEntry aggregates mDNS hostnames and services seen for one IPv4 address during a collect window.
 type MDNSEntry struct {
-	IP    string   `json:"ip"`
-	Names []string `json:"names,omitempty"`
+	IP       string        `json:"ip"`
+	Names    []string      `json:"names,omitempty"`
+	Services []MDNSService `json:"services,omitempty"`
 }
 
 // CollectMDNS listens for mDNS traffic on 224.0.0.251:5353 until listenMax (or default ~3.5s if listenMax <= 0).
@@ -42,7 +52,7 @@ func CollectMDNS(ctx context.Context, cidr string, listenMax time.Duration) ([]M
 	// Avoid blocking forever if the interface does not deliver multicast.
 	_ = conn.SetReadBuffer(1024 * 1024)
 
-	agg := make(map[string]map[string]struct{})
+	agg := newMDNSAgg()
 	buf := make([]byte, 65535)
 
 	for {
@@ -74,30 +84,84 @@ func CollectMDNS(ctx context.Context, cidr string, listenMax time.Duration) ([]M
 	return finalizeMDNS(agg), nil
 }
 
-func addDNSMsg(msg *dns.Msg, agg map[string]map[string]struct{}) {
-	rrs := append(append(msg.Answer, msg.Extra...), msg.Ns...)
-	for _, rr := range rrs {
-		t, ok := rr.(*dns.A)
-		if !ok || t.A == nil {
-			continue
-		}
-		ip4 := t.A.To4()
-		if ip4 == nil {
-			continue
-		}
-		nm := normalizeMDNSName(t.Hdr.Name)
-		if nm == "" {
-			continue
-		}
-		addName(agg, ip4.String(), nm)
+type mdnsAgg struct {
+	namesByIP    map[string]map[string]struct{}
+	hostToIP     map[string]string
+	instanceToTy map[string]map[string]struct{} // instance -> type
+	instanceSRV  map[string]mdnsSRV
+	instanceTXT  map[string][]string
+}
+
+type mdnsSRV struct {
+	Target string
+	Port   int
+}
+
+func newMDNSAgg() *mdnsAgg {
+	return &mdnsAgg{
+		namesByIP:    make(map[string]map[string]struct{}),
+		hostToIP:     make(map[string]string),
+		instanceToTy: make(map[string]map[string]struct{}),
+		instanceSRV:  make(map[string]mdnsSRV),
+		instanceTXT:  make(map[string][]string),
 	}
 }
 
-func addName(agg map[string]map[string]struct{}, ip, name string) {
-	if agg[ip] == nil {
-		agg[ip] = make(map[string]struct{})
+func addDNSMsg(msg *dns.Msg, agg *mdnsAgg) {
+	rrs := append(append(msg.Answer, msg.Extra...), msg.Ns...)
+	for _, rr := range rrs {
+		switch t := rr.(type) {
+		case *dns.A:
+			if t.A == nil {
+				continue
+			}
+			ip4 := t.A.To4()
+			if ip4 == nil {
+				continue
+			}
+			nm := normalizeMDNSName(t.Hdr.Name)
+			if nm == "" {
+				continue
+			}
+			agg.hostToIP[nm] = ip4.String()
+			addName(agg, ip4.String(), nm)
+		case *dns.PTR:
+			ty := normalizeMDNSName(t.Hdr.Name)
+			inst := normalizeMDNSName(t.Ptr)
+			if ty == "" || inst == "" {
+				continue
+			}
+			if agg.instanceToTy[inst] == nil {
+				agg.instanceToTy[inst] = make(map[string]struct{})
+			}
+			agg.instanceToTy[inst][ty] = struct{}{}
+		case *dns.SRV:
+			inst := normalizeMDNSName(t.Hdr.Name)
+			target := normalizeMDNSName(t.Target)
+			if inst == "" || target == "" || t.Port == 0 {
+				continue
+			}
+			agg.instanceSRV[inst] = mdnsSRV{Target: target, Port: int(t.Port)}
+		case *dns.TXT:
+			inst := normalizeMDNSName(t.Hdr.Name)
+			if inst == "" || len(t.Txt) == 0 {
+				continue
+			}
+			// Store at most a small number of keys to avoid blowing up raw_hints.
+			if len(t.Txt) > 24 {
+				agg.instanceTXT[inst] = append([]string{}, t.Txt[:24]...)
+			} else {
+				agg.instanceTXT[inst] = append([]string{}, t.Txt...)
+			}
+		}
 	}
-	agg[ip][name] = struct{}{}
+}
+
+func addName(agg *mdnsAgg, ip, name string) {
+	if agg.namesByIP[ip] == nil {
+		agg.namesByIP[ip] = make(map[string]struct{})
+	}
+	agg.namesByIP[ip][name] = struct{}{}
 }
 
 func normalizeMDNSName(s string) string {
@@ -106,24 +170,72 @@ func normalizeMDNSName(s string) string {
 	return s
 }
 
-func finalizeMDNS(agg map[string]map[string]struct{}) []MDNSEntry {
-	if len(agg) == 0 {
+func finalizeMDNS(agg *mdnsAgg) []MDNSEntry {
+	if agg == nil || (len(agg.namesByIP) == 0 && len(agg.instanceSRV) == 0) {
 		return nil
 	}
-	ips := make([]string, 0, len(agg))
-	for ip := range agg {
+	servicesByIP := make(map[string]map[string]MDNSService)
+	for inst, srv := range agg.instanceSRV {
+		ip := agg.hostToIP[srv.Target]
+		if ip == "" {
+			continue
+		}
+		types := agg.instanceToTy[inst]
+		if len(types) == 0 {
+			continue
+		}
+		for ty := range types {
+			svc := MDNSService{
+				Type:     ty,
+				Instance: inst,
+				Port:     srv.Port,
+				TXT:      agg.instanceTXT[inst],
+			}
+			key := ty + "|" + inst + "|" + strconv.Itoa(srv.Port)
+			if servicesByIP[ip] == nil {
+				servicesByIP[ip] = make(map[string]MDNSService)
+			}
+			servicesByIP[ip][key] = svc
+		}
+	}
+
+	allIPs := make(map[string]struct{})
+	for ip := range agg.namesByIP {
+		allIPs[ip] = struct{}{}
+	}
+	for ip := range servicesByIP {
+		allIPs[ip] = struct{}{}
+	}
+	ips := make([]string, 0, len(allIPs))
+	for ip := range allIPs {
 		ips = append(ips, ip)
 	}
 	sort.Strings(ips)
 	out := make([]MDNSEntry, 0, len(ips))
 	for _, ip := range ips {
-		set := agg[ip]
+		set := agg.namesByIP[ip]
 		names := make([]string, 0, len(set))
 		for n := range set {
 			names = append(names, n)
 		}
 		sort.Strings(names)
-		out = append(out, MDNSEntry{IP: ip, Names: names})
+		var services []MDNSService
+		if sm := servicesByIP[ip]; len(sm) > 0 {
+			services = make([]MDNSService, 0, len(sm))
+			for _, s := range sm {
+				services = append(services, s)
+			}
+			sort.Slice(services, func(i, j int) bool {
+				if services[i].Type != services[j].Type {
+					return services[i].Type < services[j].Type
+				}
+				if services[i].Port != services[j].Port {
+					return services[i].Port < services[j].Port
+				}
+				return services[i].Instance < services[j].Instance
+			})
+		}
+		out = append(out, MDNSEntry{IP: ip, Names: names, Services: services})
 	}
 	return out
 }
