@@ -15,8 +15,9 @@ func TestDisplayLabelPTRAndMDNS(t *testing.T) {
 			{Source: "mdns_name", Field: "name", Value: "chromecast-ultra.local."},
 		},
 	}
-	if got := DisplayLabel(rec, map[string]any{}, ip); got != "chromecast-ultra" {
-		t.Fatalf("mdns should win: got %q", got)
+	// Managed DNS (PTR) should beat a co-existing mDNS hostname when both look intentional.
+	if got := DisplayLabel(rec, map[string]any{}, ip); got != "livingroom-tv" {
+		t.Fatalf("ptr should win: got %q", got)
 	}
 }
 
@@ -84,6 +85,43 @@ func TestDisplayLabelServiceFN(t *testing.T) {
 		},
 	}
 	if got := DisplayLabel(rec, h, ip); got != "Living Room TV" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDisplayLabelPTRBeatsOpaqueMDNSAndGenericUPnP(t *testing.T) {
+	t.Parallel()
+	ip := "192.168.1.23"
+	rec := &Record{
+		LadderMax:     4,
+		Manufacturer:  "General",
+		Model:         "IPC",
+		DeviceClass:   "IP camera or NVR",
+		SchemaVersion: 1,
+		Signals: []Signal{
+			{Source: "ptr", Field: "name", Value: "back-of-house-cam.mercer.jlk.dev"},
+			{Source: "upnp_xml", Field: "modelDescription", Value: "General IPC"},
+			{Source: "mdns_name", Field: "name", Value: "8h0823dpag23ed1.local"},
+		},
+	}
+	h := map[string]any{
+		"mdns": map[string]any{
+			"names": []any{"8h0823dpag23ed1.local"},
+		},
+	}
+	if got := DisplayLabel(rec, h, ip); got != "back-of-house-cam" {
+		t.Fatalf("got %q want PTR short name", got)
+	}
+}
+
+func TestDisplayLabelMDNSWhenNoPTR(t *testing.T) {
+	t.Parallel()
+	rec := &Record{
+		Signals: []Signal{
+			{Source: "mdns_name", Field: "name", Value: "chromecast-ultra.local."},
+		},
+	}
+	if got := DisplayLabel(rec, map[string]any{}, "10.0.0.2"); got != "chromecast-ultra" {
 		t.Fatalf("got %q", got)
 	}
 }
