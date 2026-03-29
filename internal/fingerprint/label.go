@@ -13,7 +13,8 @@ const maxDisplayLabelRunes = 80
 // PTR, UPnP friendlyName), then hints-only fallbacks, then address.
 func DisplayLabel(rec *Record, hints map[string]any, ip string) string {
 	if rec == nil {
-		return trimLabel(fallbackHintOnlyLabel(hints, ip))
+		// Hint-only naming (Build may return nil when no fingerprint signals); still prefer hostname over "Unknown".
+		return trimLabel(firstNonEmpty(fallbackHintOnlyLabel(hints, ip), ip))
 	}
 	if s := strings.TrimSpace(summarize(rec)); s != "" && !labelLooksLikeIP(s, ip) {
 		return trimLabel(s)

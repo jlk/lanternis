@@ -211,6 +211,12 @@ func (s *Store) UpdateHostIdentity(ctx context.Context, ip, label, confidence, f
 	return err
 }
 
+// UpdateHostLabel sets only the inventory label (e.g. hint-derived name when fingerprint Build returned nil).
+func (s *Store) UpdateHostLabel(ctx context.Context, ip, label string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE hosts SET label = ? WHERE ip = ?`, label, ip)
+	return err
+}
+
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT ip, reachability, open_ports_json, open_port, label, confidence, last_seen, raw_hints_json, fingerprint_blob

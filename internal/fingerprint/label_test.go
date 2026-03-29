@@ -52,6 +52,23 @@ func TestDisplayLabelHintsOnly(t *testing.T) {
 	}
 }
 
+func TestDisplayLabelNilRecFallsBackToIP(t *testing.T) {
+	t.Parallel()
+	if got := DisplayLabel(nil, map[string]any{}, "192.168.1.12"); got != "192.168.1.12" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDisplayLabelMDNSNamesAsString(t *testing.T) {
+	t.Parallel()
+	h := map[string]any{
+		"mdns": map[string]any{"names": "office-tv.local"},
+	}
+	if got := DisplayLabel(nil, h, "192.168.1.12"); got != "office-tv" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestDisplayLabelServiceFN(t *testing.T) {
 	t.Parallel()
 	ip := "10.2.2.2"

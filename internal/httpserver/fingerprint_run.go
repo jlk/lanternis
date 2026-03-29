@@ -30,19 +30,26 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 				return
 			}
 			rec, err := fingerprint.Build(ctx, h, hints, client)
-			if err != nil || rec == nil {
-				return
-			}
-			js, err := fingerprint.RecordJSON(rec)
 			if err != nil {
 				return
 			}
 			label := fingerprint.DisplayLabel(rec, hints, h.IP)
 			if strings.TrimSpace(label) == "" {
-				label = h.Label
+				label = strings.TrimSpace(h.Label)
 			}
-			conf := fingerprint.ConfidenceFor(rec)
-			_ = s.store.UpdateHostIdentity(ctx, h.IP, label, conf, js)
+			if rec != nil {
+				js, err := fingerprint.RecordJSON(rec)
+				if err != nil {
+					return
+				}
+				conf := fingerprint.ConfidenceFor(rec)
+				_ = s.store.UpdateHostIdentity(ctx, h.IP, label, conf, js)
+				return
+			}
+			// Build returned nil (no fingerprint signals yet); still apply mDNS/PTR-style names from hints.
+			if strings.TrimSpace(label) != "" {
+				_ = s.store.UpdateHostLabel(ctx, h.IP, label)
+			}
 		}()
 	}
 	wg.Wait()

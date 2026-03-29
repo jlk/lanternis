@@ -281,6 +281,12 @@ func portSet(ports []string) map[string]bool {
 
 func stringSliceFromAny(v any) []string {
 	switch x := v.(type) {
+	case string:
+		x = strings.TrimSpace(x)
+		if x == "" {
+			return nil
+		}
+		return []string{x}
 	case []string:
 		return x
 	case []any:
