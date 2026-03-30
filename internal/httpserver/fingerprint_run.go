@@ -44,7 +44,13 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 				label = strings.TrimSpace(h.Label)
 			}
 			if rec != nil {
-				if on, _ := s.store.WebEnrichmentEnabled(ctx); on {
+				prevLLM := fingerprint.WebLLMInferencesFromBlob(h.Fingerprint)
+				if len(prevLLM) > 0 {
+					rec.Inferences = append(rec.Inferences, prevLLM...)
+					if s.debug {
+						s.debugf("web enrich ip=%s: skipped LLM call (web_llm already stored for this host)", h.IP)
+					}
+				} else if on, _ := s.store.WebEnrichmentEnabled(ctx); on {
 					prov, _ := s.store.WebEnrichmentProvider(ctx)
 					var key string
 					switch prov {

@@ -69,6 +69,25 @@ func TestInferencesFromFingerprintBlob(t *testing.T) {
 	}
 }
 
+func TestWebLLMInferencesFromBlob(t *testing.T) {
+	rec := &Record{
+		SchemaVersion: 1,
+		LadderMax:     2,
+		Inferences: []NameInference{
+			{Source: "local_rule", Text: "a"},
+			{Source: "web_llm", Kind: "product_hint", Confidence: "medium", Input: "claude", Text: "b — note", RuleID: "web_llm_v1"},
+		},
+	}
+	b, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := WebLLMInferencesFromBlob(b)
+	if len(out) != 1 || out[0].Source != "web_llm" || out[0].Text != "b — note" {
+		t.Fatalf("got %+v", out)
+	}
+}
+
 func TestBuiltinNameRulesCoverage(t *testing.T) {
 	if len(builtinNameRules) < 200 {
 		t.Fatalf("expected large curated rule set (>=200), got %d", len(builtinNameRules))

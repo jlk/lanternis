@@ -15,3 +15,19 @@ func InferencesFromFingerprintBlob(raw []byte) []NameInference {
 	}
 	return stub.Inferences
 }
+
+// WebLLMInferencesFromBlob returns only web_llm rows from persisted fingerprint JSON.
+// Used to avoid repeat API calls when a host already has a stored LLM name hint.
+func WebLLMInferencesFromBlob(raw []byte) []NameInference {
+	all := InferencesFromFingerprintBlob(raw)
+	if len(all) == 0 {
+		return nil
+	}
+	var out []NameInference
+	for _, inf := range all {
+		if inf.Source == "web_llm" {
+			out = append(out, inf)
+		}
+	}
+	return out
+}
