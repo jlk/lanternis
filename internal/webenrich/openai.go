@@ -72,7 +72,7 @@ func callOpenAI(ctx context.Context, apiKey, prompt string) (string, error) {
 		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("openai http %d", resp.StatusCode)
+		return "", openaiHTTPError(resp.StatusCode, respBytes)
 	}
 	var wrap openAIResp
 	if err := json.Unmarshal(respBytes, &wrap); err != nil {
@@ -85,6 +85,21 @@ func callOpenAI(ctx context.Context, apiKey, prompt string) (string, error) {
 		return "", errors.New("openai: empty choices")
 	}
 	return strings.TrimSpace(wrap.Choices[0].Message.Content), nil
+}
+
+func openaiHTTPError(status int, respBytes []byte) error {
+	var wrap openAIResp
+	if json.Unmarshal(respBytes, &wrap) == nil && wrap.Error != nil && strings.TrimSpace(wrap.Error.Message) != "" {
+		return fmt.Errorf("openai http %d: %s", status, strings.TrimSpace(wrap.Error.Message))
+	}
+	s := strings.TrimSpace(string(respBytes))
+	if len(s) > 400 {
+		s = s[:400] + "…"
+	}
+	if s == "" {
+		return fmt.Errorf("openai http %d (empty body)", status)
+	}
+	return fmt.Errorf("openai http %d: %s", status, s)
 }
 
 type enrichJSON struct {

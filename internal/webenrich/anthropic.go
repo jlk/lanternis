@@ -15,6 +15,9 @@ import (
 // anthropicMessagesURL is overridable in tests.
 var anthropicMessagesURL = "https://api.anthropic.com/v1/messages"
 
+// anthropicModel is a current Haiku snapshot (3.5-era IDs such as claude-3-5-haiku-20241022 return 404 after retirement).
+const anthropicModel = "claude-haiku-4-5-20251001"
+
 type anthropicReq struct {
 	Model     string             `json:"model"`
 	MaxTokens int                `json:"max_tokens"`
@@ -41,7 +44,7 @@ type anthropicResp struct {
 func callAnthropic(ctx context.Context, apiKey, userPrompt string) (string, error) {
 	system := "You reply with a single JSON object only, no markdown fences. Keys: guess (string), confidence (\"low\"|\"medium\"|\"high\"), note (string)."
 	reqBody := anthropicReq{
-		Model:     "claude-3-5-haiku-20241022",
+		Model:     anthropicModel,
 		MaxTokens: 320,
 		System:    system,
 		Messages: []anthropicMessage{
@@ -71,7 +74,7 @@ func callAnthropic(ctx context.Context, apiKey, userPrompt string) (string, erro
 		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("anthropic http %d", resp.StatusCode)
+		return "", anthropicHTTPError(resp.StatusCode, respBytes)
 	}
 	var wrap anthropicResp
 	if err := json.Unmarshal(respBytes, &wrap); err != nil {
@@ -86,4 +89,25 @@ func callAnthropic(ctx context.Context, apiKey, userPrompt string) (string, erro
 		}
 	}
 	return "", errors.New("anthropic: empty content")
+}
+
+// anthropicHTTPError turns a failed status into an error that includes the API message when present
+// (404 often means unknown or retired model; 401 invalid key).
+func anthropicHTTPError(status int, respBytes []byte) error {
+	var wrap anthropicResp
+	if json.Unmarshal(respBytes, &wrap) == nil && wrap.Error != nil && strings.TrimSpace(wrap.Error.Message) != "" {
+		t := strings.TrimSpace(wrap.Error.Type)
+		if t != "" {
+			return fmt.Errorf("anthropic http %d: %s (error.type=%s)", status, strings.TrimSpace(wrap.Error.Message), t)
+		}
+		return fmt.Errorf("anthropic http %d: %s", status, strings.TrimSpace(wrap.Error.Message))
+	}
+	s := strings.TrimSpace(string(respBytes))
+	if len(s) > 400 {
+		s = s[:400] + "…"
+	}
+	if s == "" {
+		return fmt.Errorf("anthropic http %d (empty body)", status)
+	}
+	return fmt.Errorf("anthropic http %d: %s", status, s)
 }
