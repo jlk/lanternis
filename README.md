@@ -49,7 +49,7 @@ Example:
 
 ```
 
-Matching is case-insensitive for hostnames; MAC prefixes are normalized (`:` separators, lower case). These labels appear under **Name hints** on the host detail panel and in **`GET /api/host`** as `inferences`—they do **not** replace the main inventory label.
+Matching is case-insensitive for hostnames; MAC prefixes are normalized (`:` separators, lower case). These labels appear under **Name hints** on the host detail panel and in **`GET /api/host`** as `inferences`. Use **Use as label** in the device drawer (or **`POST /api/host/label-from-hint`**) to copy a hint into the main inventory label.
 
 ## License
 

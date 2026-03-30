@@ -213,6 +213,30 @@ func trimLabel(s string) string {
 	return s
 }
 
+// InventoryLabelFromInference builds a concise hosts.label string from a name inference (user-chosen).
+// Uses the text before an em dash (guess) when present, otherwise the full text, trimmed to the display cap.
+func InventoryLabelFromInference(in NameInference) string {
+	t := strings.TrimSpace(in.Text)
+	if t == "" {
+		return ""
+	}
+	if i := strings.Index(t, " — "); i > 0 {
+		t = strings.TrimSpace(t[:i])
+	}
+	return trimLabel(t)
+}
+
+// HostConfidenceFromInference maps inference confidence to the host confidence field.
+func HostConfidenceFromInference(in NameInference) string {
+	c := strings.ToLower(strings.TrimSpace(in.Confidence))
+	switch c {
+	case "high", "medium", "low":
+		return c
+	default:
+		return "medium"
+	}
+}
+
 func labelLooksLikeIP(s, ip string) bool {
 	s = strings.TrimSpace(s)
 	if strings.EqualFold(s, ip) {

@@ -131,6 +131,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/diagnostics", s.handleDiagnostics)
 	s.mux.HandleFunc("/api/hosts", s.handleHosts)
 	s.mux.HandleFunc("/api/host", s.handleHostDetail)
+	s.mux.HandleFunc("/api/host/label-from-hint", s.requireCSRF(s.handleHostLabelFromHint))
 	s.mux.HandleFunc("/api/runtime", s.handleRuntime)
 	s.mux.HandleFunc("/api/setup/status", s.handleSetupStatus)
 	s.mux.HandleFunc("/api/setup/complete", s.requireCSRF(s.handleSetupComplete))
@@ -421,6 +422,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
     const hostDetailContent = document.getElementById("hostDetailContent");
     const hostDetailClose = document.getElementById("hostDetailClose");
     const hostColumnPicker = document.getElementById("hostColumnPicker");
+    let lastHostDetailIP = "";
 
     let currentHosts = [];
     let sort = { col: "ip", dir: "asc" };
@@ -1029,7 +1031,9 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         for (let ii = 0; ii < inferences.length; ii++) {
           const n = inferences[ii];
           const meta = "<span class='muted' style='font-size:12px;'>(" + esc(n.source || "") + " · " + esc(n.confidence || "") + (n.input ? " · matched <code>" + esc(n.input) + "</code>" : "") + ")</span>";
-          inferHtml += "<li style='margin-bottom:8px;'>" + esc(n.text || "") + " " + meta + "</li>";
+          inferHtml += "<li style='margin-bottom:10px;display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px;justify-content:space-between;'>" +
+            "<span style='flex:1;min-width:12rem;'>" + esc(n.text || "") + " " + meta + "</span>" +
+            "<button type='button' class='primary' data-infer-idx='" + String(ii) + "' style='font-size:13px;min-height:40px;padding:8px 12px;flex-shrink:0;'>Use as label</button></li>";
         }
         inferHtml += "</ul>";
       }
@@ -1044,7 +1048,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         "<p style='margin:0 0 8px 0;'>Vendor " + vendorLine + "</p>" +
         "<p style='margin:0;'>Reachability <strong>" + esc(h.reachability || "unknown") + "</strong> · Confidence <strong>" + esc(h.confidence || "unknown") + "</strong> · Last seen " +
         (h.last_seen ? fmtDetailTime(h.last_seen) : "—") + "</p></section>" +
-        "<section class='host-detail-section'><h3>Name hints</h3><p class='muted' style='margin:0 0 10px 0;font-size:13px;'>Guesses from hostnames and optional user aliases—<strong>not</strong> verified like UPnP or TLS. Does not change the inventory label.</p>" +
+        "<section class='host-detail-section'><h3>Name hints</h3><p class='muted' style='margin:0 0 10px 0;font-size:13px;'>Guesses from hostnames, rules, aliases, or optional LLM—<strong>not</strong> verified like UPnP or TLS. <strong>Use as label</strong> sets this host’s inventory label (your choice; a future scan may overwrite unless you pick again).</p>" +
         inferHtml + "</section>" +
         "<section class='host-detail-section'><h3>Findings</h3><p class='muted' style='margin:0 0 10px 0;font-size:13px;'>Per-surface software identity for vulnerability-oriented review (not the same as display label).</p>" +
         findingsHtml + "</section>" +
@@ -1065,6 +1069,7 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       if (!ip) {
         return;
       }
+      lastHostDetailIP = ip;
       clearError();
       hostDetailTitle.textContent = "Device · " + ip;
       hostDetailContent.innerHTML = "<p class='muted'>Loading…</p>";
@@ -1331,7 +1336,31 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       }
     });
     hostDetailClose.addEventListener("click", () => closeHostDetail());
-    hostDetailOverlay.addEventListener("click", (e) => {
+    hostDetailOverlay.addEventListener("click", async (e) => {
+      const btn = e.target && e.target.closest ? e.target.closest("button[data-infer-idx]") : null;
+      if (btn && hostDetailOverlay.contains(btn)) {
+        e.preventDefault();
+        const idx = parseInt(btn.getAttribute("data-infer-idx"), 10);
+        if (Number.isNaN(idx) || idx < 0 || !lastHostDetailIP) {
+          return;
+        }
+        btn.disabled = true;
+        try {
+          await fetchJSON("/api/host/label-from-hint", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+            body: JSON.stringify({ ip: lastHostDetailIP, inference_index: idx })
+          });
+          const d = await fetchJSON("/api/host?ip=" + encodeURIComponent(lastHostDetailIP));
+          renderHostDetail(d);
+          await loadHosts();
+        } catch (err) {
+          showError(err.message);
+        } finally {
+          btn.disabled = false;
+        }
+        return;
+      }
       if (e.target === hostDetailOverlay) {
         closeHostDetail();
       }

@@ -479,6 +479,41 @@ func TestHostDetailAPI(t *testing.T) {
 	}
 }
 
+func TestHostLabelFromHintAPI(t *testing.T) {
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	fp := `{"schema_version":1,"ladder_max":2,"inferences":[{"source":"local_rule","kind":"product_hint","confidence":"high","input":"x","text":"My Device — note here","rule_id":"t"}]}`
+	if err := st.UpsertHost(ctx, store.Host{
+		IP: "10.0.0.7", Reachability: "reachable", Label: "Old", Confidence: "low",
+		LastSeen: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateHostIdentity(ctx, "10.0.0.7", "Old", "low", fp); err != nil {
+		t.Fatal(err)
+	}
+	token, cookie := csrfTokenAndCookie(t, srv)
+	req := httptest.NewRequest(http.MethodPost, "/api/host/label-from-hint", bytes.NewBufferString(`{"ip":"10.0.0.7","inference_index":0}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", token)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d %s", rec.Code, rec.Body.String())
+	}
+	h, err := st.GetHost(ctx, "10.0.0.7")
+	if err != nil || h == nil {
+		t.Fatal(err)
+	}
+	if h.Label != "My Device" {
+		t.Fatalf("label %q", h.Label)
+	}
+	if h.Confidence != "high" {
+		t.Fatalf("confidence %q", h.Confidence)
+	}
+}
+
 func TestScanStartForbiddenBeforeFirstRun(t *testing.T) {
 	srv, _ := newTestServerWithoutFirstRun(t)
 	token, cookie := csrfTokenAndCookie(t, srv)

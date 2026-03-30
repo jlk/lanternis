@@ -125,3 +125,20 @@ func TestDisplayLabelMDNSWhenNoPTR(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestInventoryLabelFromInference(t *testing.T) {
+	t.Parallel()
+	got := InventoryLabelFromInference(NameInference{Text: "Chromecast Ultra — optional note"})
+	if got != "Chromecast Ultra" {
+		t.Fatalf("got %q", got)
+	}
+	if InventoryLabelFromInference(NameInference{Text: "  "}) != "" {
+		t.Fatal("expected empty")
+	}
+	if HostConfidenceFromInference(NameInference{Confidence: "bogus"}) != "medium" {
+		t.Fatal("default confidence")
+	}
+	if HostConfidenceFromInference(NameInference{Confidence: "low"}) != "low" {
+		t.Fatal("low")
+	}
+}

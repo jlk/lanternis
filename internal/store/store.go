@@ -220,6 +220,12 @@ func (s *Store) UpdateHostLabel(ctx context.Context, ip, label string) error {
 	return err
 }
 
+// UpdateHostLabelAndConfidence sets the inventory label and confidence together (e.g. user picked a hint).
+func (s *Store) UpdateHostLabelAndConfidence(ctx context.Context, ip, label, confidence string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE hosts SET label = ?, confidence = ? WHERE ip = ?`, label, confidence, ip)
+	return err
+}
+
 func (s *Store) ListHosts(ctx context.Context) ([]Host, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT ip, reachability, open_ports_json, open_port, label, confidence, last_seen, raw_hints_json, fingerprint_blob
