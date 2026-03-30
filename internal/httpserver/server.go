@@ -19,7 +19,12 @@ import (
 	"github.com/jlk/lanternis/internal/discovery/passive"
 	"github.com/jlk/lanternis/internal/fingerprint"
 	"github.com/jlk/lanternis/internal/store"
+	"golang.org/x/time/rate"
 )
+
+// webEnrichRPM caps LLM calls per minute across all scan workers. Anthropic's default org
+// limit is often 50 RPM; stay slightly under to reduce 429s when many hosts finish at once.
+const webEnrichRPM = 45
 
 type Server struct {
 	logger        *log.Logger
@@ -30,6 +35,10 @@ type Server struct {
 	version       string
 	debug         bool
 	deviceAliases *fingerprint.DeviceAliasesFile
+
+	// webEnrichLimit serializes/throttles optional internet name hints so parallel
+	// fingerprint workers do not exceed provider per-minute caps.
+	webEnrichLimit *rate.Limiter
 }
 
 // Config is optional metadata for diagnostics and the UI.
@@ -63,6 +72,7 @@ func New(logger *log.Logger, st *store.Store, scanner *discovery.Scanner, cfg Co
 		version:       v,
 		debug:         cfg.Debug,
 		deviceAliases: aliases,
+		webEnrichLimit: rate.NewLimiter(rate.Limit(float64(webEnrichRPM)/60.0), 1),
 	}
 	s.routes()
 	if cfg.Debug {

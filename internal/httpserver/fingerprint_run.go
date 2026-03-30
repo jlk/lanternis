@@ -53,18 +53,28 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 					default:
 						key, _ = s.store.OpenAIAPIKey(ctx)
 					}
-					if key != "" {
-						enrichCtx, cancel := context.WithTimeout(ctx, 13*time.Second)
-						nBefore := webLLMInferenceCount(rec)
-						err := webenrich.EnrichRecord(enrichCtx, rec, hints, prov, key)
-						cancel()
-						if s.debug {
-							if err != nil {
-								s.debugf("web enrich ip=%s provider=%s: %v", h.IP, prov, err)
-							} else if webLLMInferenceCount(rec) > nBefore {
-								s.debugf("web enrich ip=%s provider=%s: added web_llm name hint", h.IP, prov)
-							} else {
-								s.debugf("web enrich ip=%s provider=%s: no hint (not enough name text, model empty reply, or parse miss)", h.IP, prov)
+					if key != "" && s.webEnrichLimit != nil {
+						// Wait for an RPM slot (large LANs can queue many hosts; do not use the HTTP timeout for this).
+						queueCtx, queueCancel := context.WithTimeout(ctx, 3*time.Minute)
+						waitErr := s.webEnrichLimit.Wait(queueCtx)
+						queueCancel()
+						if waitErr != nil {
+							if s.debug {
+								s.debugf("web enrich ip=%s provider=%s: skipped waiting for rate limit slot: %v", h.IP, prov, waitErr)
+							}
+						} else {
+							enrichCtx, enrichCancel := context.WithTimeout(ctx, 13*time.Second)
+							nBefore := webLLMInferenceCount(rec)
+							err := webenrich.EnrichRecord(enrichCtx, rec, hints, prov, key)
+							enrichCancel()
+							if s.debug {
+								if err != nil {
+									s.debugf("web enrich ip=%s provider=%s: %v", h.IP, prov, err)
+								} else if webLLMInferenceCount(rec) > nBefore {
+									s.debugf("web enrich ip=%s provider=%s: added web_llm name hint", h.IP, prov)
+								} else {
+									s.debugf("web enrich ip=%s provider=%s: no hint (not enough name text, model empty reply, or parse miss)", h.IP, prov)
+								}
 							}
 						}
 					}
