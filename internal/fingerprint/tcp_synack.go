@@ -11,7 +11,7 @@ type SynAckFeat struct {
 	TTL  int
 	Win  uint16
 	MSS  uint16
-	WS   int  // -1 if absent
+	WS   int // -1 if absent
 	SACK bool
 	TS   bool
 }

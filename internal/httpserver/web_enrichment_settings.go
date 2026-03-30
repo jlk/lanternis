@@ -53,9 +53,9 @@ func (s *Server) handleWebEnrichmentSettings(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"enabled":                     en,
-			"provider":                    prov,
-			"openai_api_key_configured":   openOK,
+			"enabled":                      en,
+			"provider":                     prov,
+			"openai_api_key_configured":    openOK,
 			"anthropic_api_key_configured": anOK,
 		})
 	case http.MethodPost:

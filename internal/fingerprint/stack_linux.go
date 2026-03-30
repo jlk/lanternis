@@ -141,7 +141,7 @@ func buildRawSYN(src, dst net.IP, sport, dport uint16, seq uint32) []byte {
 	binary.BigEndian.PutUint16(ip[2:4], uint16(totalLen))
 	binary.BigEndian.PutUint16(ip[4:6], uint16(time.Now().UnixNano()&0xffff))
 	ip[6], ip[7] = 0x40, 0 // don't fragment
-	ip[8] = 64 // TTL
+	ip[8] = 64             // TTL
 	ip[9] = unix.IPPROTO_TCP
 	copy(ip[12:16], src)
 	copy(ip[16:20], dst)
@@ -153,8 +153,8 @@ func buildRawSYN(src, dst net.IP, sport, dport uint16, seq uint32) []byte {
 	binary.BigEndian.PutUint16(tcp[2:4], dport)
 	binary.BigEndian.PutUint32(tcp[4:8], seq)
 	binary.BigEndian.PutUint32(tcp[8:12], 0)
-	tcp[12] = 0x50 // data offset 5
-	tcp[13] = 0x02 // SYN
+	tcp[12] = 0x50                                // data offset 5
+	tcp[13] = 0x02                                // SYN
 	binary.BigEndian.PutUint16(tcp[14:16], 64240) // window
 	tcp[16], tcp[17] = 0, 0
 

@@ -83,12 +83,12 @@ func (s *Server) buildDiagnostics(ctx context.Context) (map[string]any, error) {
 			"thorough": 48,
 			"deep":     48,
 		},
-		"last_scan":    lastScan,
-		"audit_events": events,
-		"web_enrichment_enabled":          webEnrich,
-		"web_enrichment_provider":         webProv,
-		"openai_api_key_configured":       openAIConfigured,
-		"anthropic_api_key_configured":    anthropicConfigured,
+		"last_scan":                    lastScan,
+		"audit_events":                 events,
+		"web_enrichment_enabled":       webEnrich,
+		"web_enrichment_provider":      webProv,
+		"openai_api_key_configured":    openAIConfigured,
+		"anthropic_api_key_configured": anthropicConfigured,
 	}, nil
 }
 

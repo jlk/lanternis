@@ -56,39 +56,39 @@ func appendUPnPGranularFindings(rec *Record, out *[]store.Finding) {
 		switch s.Field {
 		case "manufacturer":
 			*out = append(*out, store.Finding{
-				Surface:             "upnp/manufacturer",
-				VendorGuess:         v,
-				VersionConfidence:   "high",
-				EvidenceKind:        "upnp_manufacturer",
-				EvidenceDigest:      digestEvidence(v),
-				VulnReady:           false,
+				Surface:           "upnp/manufacturer",
+				VendorGuess:       v,
+				VersionConfidence: "high",
+				EvidenceKind:      "upnp_manufacturer",
+				EvidenceDigest:    digestEvidence(v),
+				VulnReady:         false,
 			})
 		case "modelName":
 			*out = append(*out, store.Finding{
-				Surface:             "upnp/modelName",
-				ProductGuess:        v,
-				VersionConfidence:   "high",
-				EvidenceKind:        "upnp_modelName",
-				EvidenceDigest:      digestEvidence(v),
-				VulnReady:           false,
+				Surface:           "upnp/modelName",
+				ProductGuess:      v,
+				VersionConfidence: "high",
+				EvidenceKind:      "upnp_modelName",
+				EvidenceDigest:    digestEvidence(v),
+				VulnReady:         false,
 			})
 		case "modelNumber":
 			*out = append(*out, store.Finding{
-				Surface:             "upnp/modelNumber",
-				ProductGuess:        v,
-				VersionConfidence:   "high",
-				EvidenceKind:        "upnp_modelNumber",
-				EvidenceDigest:      digestEvidence(v),
-				VulnReady:           false,
+				Surface:           "upnp/modelNumber",
+				ProductGuess:      v,
+				VersionConfidence: "high",
+				EvidenceKind:      "upnp_modelNumber",
+				EvidenceDigest:    digestEvidence(v),
+				VulnReady:         false,
 			})
 		case "softwareVersion":
 			*out = append(*out, store.Finding{
-				Surface:             "upnp/softwareVersion",
-				VersionGuess:        v,
-				VersionConfidence:   "high",
-				EvidenceKind:        "upnp_softwareVersion",
-				EvidenceDigest:      digestEvidence(v),
-				VulnReady:           true,
+				Surface:           "upnp/softwareVersion",
+				VersionGuess:      v,
+				VersionConfidence: "high",
+				EvidenceKind:      "upnp_softwareVersion",
+				EvidenceDigest:    digestEvidence(v),
+				VulnReady:         true,
 			})
 		}
 	}
@@ -108,14 +108,14 @@ func appendLegacyUPnPCombined(rec *Record, out *[]store.Finding) {
 	}
 	ev := strings.TrimSpace(rec.Manufacturer + "|" + rec.Model + "|" + rec.FirmwareVersion)
 	*out = append(*out, store.Finding{
-		Surface:             "upnp/device",
-		VendorGuess:         strings.TrimSpace(rec.Manufacturer),
-		ProductGuess:        strings.TrimSpace(rec.Model),
-		VersionGuess:        strings.TrimSpace(rec.FirmwareVersion),
-		VersionConfidence:   conf,
-		EvidenceKind:        "upnp_device_xml",
-		EvidenceDigest:      digestEvidence(ev),
-		VulnReady:           vr,
+		Surface:           "upnp/device",
+		VendorGuess:       strings.TrimSpace(rec.Manufacturer),
+		ProductGuess:      strings.TrimSpace(rec.Model),
+		VersionGuess:      strings.TrimSpace(rec.FirmwareVersion),
+		VersionConfidence: conf,
+		EvidenceKind:      "upnp_device_xml",
+		EvidenceDigest:    digestEvidence(ev),
+		VulnReady:         vr,
 	})
 }
 
@@ -191,14 +191,14 @@ func appendHTTPExtractFindings(rec *Record, out *[]store.Finding) {
 			evk += ":" + p.Path
 		}
 		*out = append(*out, store.Finding{
-			Surface:             surf,
-			VendorGuess:         "",
-			ProductGuess:        strings.TrimSpace(p.Product),
-			VersionGuess:        strings.TrimSpace(p.Version),
-			VersionConfidence:   conf,
-			EvidenceKind:        evk,
-			EvidenceDigest:      digestEvidence(strings.TrimSpace(p.Evidence)),
-			VulnReady:           vr,
+			Surface:           surf,
+			VendorGuess:       "",
+			ProductGuess:      strings.TrimSpace(p.Product),
+			VersionGuess:      strings.TrimSpace(p.Version),
+			VersionConfidence: conf,
+			EvidenceKind:      evk,
+			EvidenceDigest:    digestEvidence(strings.TrimSpace(p.Evidence)),
+			VulnReady:         vr,
 		})
 	}
 }
@@ -214,12 +214,12 @@ func appendTLSWeakFindings(rec *Record, out *[]store.Finding) {
 		}
 		v := strings.TrimSpace(s.Value)
 		*out = append(*out, store.Finding{
-			Surface:             surf,
-			ProductGuess:        v,
-			VersionConfidence:   "low",
-			EvidenceKind:        "tls_cert:" + s.Field,
-			EvidenceDigest:      digestEvidence(v),
-			VulnReady:           false,
+			Surface:           surf,
+			ProductGuess:      v,
+			VersionConfidence: "low",
+			EvidenceKind:      "tls_cert:" + s.Field,
+			EvidenceDigest:    digestEvidence(v),
+			VulnReady:         false,
 		})
 	}
 }
@@ -244,13 +244,13 @@ func appendSSHFindings(rec *Record, out *[]store.Finding) {
 			v = v[:256]
 		}
 		*out = append(*out, store.Finding{
-			Surface:             "tcp:22/ssh",
-			ProductGuess:        "OpenSSH",
-			VersionGuess:        ver,
-			VersionConfidence:   conf,
-			EvidenceKind:        "ssh_banner",
-			EvidenceDigest:      digestEvidence(v),
-			VulnReady:           vr,
+			Surface:           "tcp:22/ssh",
+			ProductGuess:      "OpenSSH",
+			VersionGuess:      ver,
+			VersionConfidence: conf,
+			EvidenceKind:      "ssh_banner",
+			EvidenceDigest:    digestEvidence(v),
+			VulnReady:         vr,
 		})
 		break
 	}

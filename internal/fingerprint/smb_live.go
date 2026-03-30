@@ -127,15 +127,15 @@ func buildSMB1SessionSetup(uid uint16, mid uint16, secBlob []byte) []byte {
 	p := make([]byte, 27)
 	p[0] = 13
 	binary.LittleEndian.PutUint16(p[1:3], 0x00ff) // AndX 0xFF, Reserved 0
-	binary.LittleEndian.PutUint16(p[3:5], 0)     // AndXOffset
+	binary.LittleEndian.PutUint16(p[3:5], 0)      // AndXOffset
 	binary.LittleEndian.PutUint16(p[5:7], 0xffff)
 	binary.LittleEndian.PutUint16(p[7:9], 10)
 	binary.LittleEndian.PutUint16(p[9:11], 0)
 	binary.LittleEndian.PutUint32(p[11:15], 0)
 	binary.LittleEndian.PutUint16(p[15:17], uint16(len(secBlob))) // SecurityBlobLength (OEM len field)
-	binary.LittleEndian.PutUint16(p[17:19], 0)                     // UnicodePasswordLen
-	binary.LittleEndian.PutUint32(p[19:23], 0)                     // Reserved
-	binary.LittleEndian.PutUint32(p[23:27], 0x800000d5)            // Capabilities
+	binary.LittleEndian.PutUint16(p[17:19], 0)                    // UnicodePasswordLen
+	binary.LittleEndian.PutUint32(p[19:23], 0)                    // Reserved
+	binary.LittleEndian.PutUint32(p[23:27], 0x800000d5)           // Capabilities
 
 	b := make([]byte, 0, len(hdr)+len(p)+2+len(secBlob))
 	b = append(b, hdr...)

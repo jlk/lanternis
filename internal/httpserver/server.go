@@ -64,14 +64,14 @@ func New(logger *log.Logger, st *store.Store, scanner *discovery.Scanner, cfg Co
 		aliases = emptyAliases
 	}
 	s := &Server{
-		logger:        logger,
-		store:         st,
-		scanner:       scanner,
-		mux:           http.NewServeMux(),
-		dbPath:        cfg.DBPath,
-		version:       v,
-		debug:         cfg.Debug,
-		deviceAliases: aliases,
+		logger:         logger,
+		store:          st,
+		scanner:        scanner,
+		mux:            http.NewServeMux(),
+		dbPath:         cfg.DBPath,
+		version:        v,
+		debug:          cfg.Debug,
+		deviceAliases:  aliases,
 		webEnrichLimit: rate.NewLimiter(rate.Limit(float64(webEnrichRPM)/60.0), 1),
 	}
 	s.routes()
