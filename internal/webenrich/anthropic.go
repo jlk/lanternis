@@ -42,7 +42,7 @@ type anthropicResp struct {
 }
 
 func callAnthropic(ctx context.Context, apiKey, userPrompt string) (string, error) {
-	system := "You reply with a single JSON object only, no markdown fences. Keys: guess (string), confidence (\"low\"|\"medium\"|\"high\"), note (string)."
+	system := "You reply with a single JSON object only, no markdown fences. Keys: guess, confidence (low|medium|high), note, vendor (brand or empty), device_class_key (printer|camera|nas|router|home_automation|media|game_console|mobile|server|audio|computer|network|iot or empty), os_family (linux|windows|darwin|embedded or empty)."
 	reqBody := anthropicReq{
 		Model:     anthropicModel,
 		MaxTokens: 320,

@@ -35,8 +35,13 @@ func firstOUIFromRecord(rec *fingerprint.Record) string {
 func buildPrompt(haystack, deviceClass, ouiVendor string) string {
 	var b strings.Builder
 	b.WriteString("You help identify consumer home-network devices from hostname and mDNS fragments only.\n")
-	b.WriteString("Reply with a single JSON object and nothing else. Keys: guess (string, short product name or empty if unknown), ")
-	b.WriteString("confidence (\"low\"|\"medium\"|\"high\"), note (one short sentence; no PII).\n")
+	b.WriteString("Reply with a single JSON object and nothing else. Keys:\n")
+	b.WriteString("- guess (string): short product name or empty if unknown.\n")
+	b.WriteString("- confidence (\"low\"|\"medium\"|\"high\").\n")
+	b.WriteString("- note (string): one short sentence; no PII.\n")
+	b.WriteString("- vendor (string): brand/manufacturer if reasonably inferable, else \"\".\n")
+	b.WriteString("- device_class_key (string): one of printer|camera|nas|router|home_automation|media|game_console|mobile|server|audio|computer|network|iot — or \"\" if unknown.\n")
+	b.WriteString("- os_family (string): one of linux|windows|darwin|embedded — or \"\" if unknown (do not guess OS from vendor alone).\n")
 	b.WriteString("Do not repeat long strings from the hints. Do not invent a specific CVE or firmware.\n\n")
 	if deviceClass != "" {
 		b.WriteString("Inferred device class (heuristic): ")

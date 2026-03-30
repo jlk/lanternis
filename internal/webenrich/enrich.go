@@ -43,17 +43,19 @@ func EnrichRecord(ctx context.Context, rec *fingerprint.Record, hints map[string
 	if err != nil {
 		return err
 	}
-	guess, conf, note, err := parseEnrichmentJSON(body, defaultNoteForProvider(p))
-	if err != nil || strings.TrimSpace(guess) == "" {
+	payload, err := parseEnrichmentPayload(body, defaultNoteForProvider(p))
+	if err != nil || strings.TrimSpace(payload.Guess) == "" {
 		return err
 	}
 	rec.Inferences = stripWebLLM(rec.Inferences)
+	rec.Signals = fingerprint.StripWebLLMSignals(rec.Signals)
+	fingerprint.ApplyWebLLMStructured(rec, payload.Vendor, payload.DeviceClassKey, payload.OSFamily, payload.Confidence)
 	rec.Inferences = append(rec.Inferences, fingerprint.NameInference{
 		Source:     "web_llm",
 		Kind:       "product_hint",
-		Confidence: conf,
+		Confidence: payload.Confidence,
 		Input:      inferenceInputTag(p),
-		Text:       strings.TrimSpace(guess) + " — " + strings.TrimSpace(note),
+		Text:       strings.TrimSpace(payload.Guess) + " — " + strings.TrimSpace(payload.Note),
 		RuleID:     "web_llm_v1",
 	})
 	return nil

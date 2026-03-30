@@ -102,35 +102,41 @@ func openaiHTTPError(status int, respBytes []byte) error {
 	return fmt.Errorf("openai http %d: %s", status, s)
 }
 
-type enrichJSON struct {
-	Guess      string `json:"guess"`
-	Confidence string `json:"confidence"`
-	Note       string `json:"note"`
+type enrichPayload struct {
+	Guess          string `json:"guess"`
+	Confidence     string `json:"confidence"`
+	Note           string `json:"note"`
+	Vendor         string `json:"vendor"`
+	DeviceClassKey string `json:"device_class_key"`
+	OSFamily       string `json:"os_family"`
 }
 
-func parseEnrichmentJSON(s, defaultNote string) (guess, confidence, note string, err error) {
+func parseEnrichmentPayload(s, defaultNote string) (enrichPayload, error) {
+	var out enrichPayload
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return "", "", "", errors.New("empty content")
+		return out, errors.New("empty content")
 	}
 	s = strings.TrimPrefix(s, "```json")
 	s = strings.TrimPrefix(s, "```")
 	s = strings.TrimSuffix(s, "```")
 	s = strings.TrimSpace(s)
-	var e enrichJSON
-	if err := json.Unmarshal([]byte(s), &e); err != nil {
-		return "", "", "", err
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return out, err
 	}
-	guess = strings.TrimSpace(e.Guess)
-	conf := strings.ToLower(strings.TrimSpace(e.Confidence))
-	switch conf {
+	out.Guess = strings.TrimSpace(out.Guess)
+	out.Confidence = strings.ToLower(strings.TrimSpace(out.Confidence))
+	switch out.Confidence {
 	case "low", "medium", "high":
 	default:
-		conf = "low"
+		out.Confidence = "low"
 	}
-	note = strings.TrimSpace(e.Note)
-	if note == "" {
-		note = defaultNote
+	out.Note = strings.TrimSpace(out.Note)
+	if out.Note == "" {
+		out.Note = defaultNote
 	}
-	return guess, conf, note, nil
+	out.Vendor = strings.TrimSpace(out.Vendor)
+	out.DeviceClassKey = strings.TrimSpace(out.DeviceClassKey)
+	out.OSFamily = strings.TrimSpace(out.OSFamily)
+	return out, nil
 }

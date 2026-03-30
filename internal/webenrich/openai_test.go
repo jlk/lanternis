@@ -10,16 +10,16 @@ import (
 	"github.com/jlk/lanternis/internal/fingerprint"
 )
 
-func TestParseEnrichmentJSON(t *testing.T) {
-	g, c, n, err := parseEnrichmentJSON(`{"guess":"x","confidence":"HIGH","note":"y"}`, "def")
-	if err != nil || g != "x" || c != "high" || n != "y" {
-		t.Fatalf("got %q %q %q err %v", g, c, n, err)
+func TestParseEnrichmentPayload(t *testing.T) {
+	p, err := parseEnrichmentPayload(`{"guess":"x","confidence":"HIGH","note":"y","vendor":"Acme","device_class_key":"media","os_family":"linux"}`, "def")
+	if err != nil || p.Guess != "x" || p.Confidence != "high" || p.Note != "y" || p.Vendor != "Acme" || p.DeviceClassKey != "media" || p.OSFamily != "linux" {
+		t.Fatalf("got %+v err %v", p, err)
 	}
-	g, c, n, err = parseEnrichmentJSON(`{"guess":"","confidence":"low","note":""}`, "fallback")
-	if err != nil || n != "fallback" {
-		t.Fatalf("got %q %q %q err %v", g, c, n, err)
+	p, err = parseEnrichmentPayload(`{"guess":"","confidence":"low","note":""}`, "fallback")
+	if err != nil || p.Note != "fallback" {
+		t.Fatalf("got %+v err %v", p, err)
 	}
-	_, _, _, err = parseEnrichmentJSON("```json\n{\"guess\":\"\",\"confidence\":\"low\",\"note\":\"nope\"}\n```", "x")
+	_, err = parseEnrichmentPayload("```json\n{\"guess\":\"\",\"confidence\":\"low\",\"note\":\"nope\"}\n```", "x")
 	if err != nil {
 		t.Fatal(err)
 	}
