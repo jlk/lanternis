@@ -22,6 +22,8 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const nmapEnrichMaxConcurrent = 2
+
 // webEnrichRPM caps LLM calls per minute across all scan workers. Anthropic's default org
 // limit is often 50 RPM; stay slightly under to reduce 429s when many hosts finish at once.
 const webEnrichRPM = 45
@@ -39,6 +41,8 @@ type Server struct {
 	// webEnrichLimit serializes/throttles optional internet name hints so parallel
 	// fingerprint workers do not exceed provider per-minute caps.
 	webEnrichLimit *rate.Limiter
+	// nmapSem bounds concurrent optional nmap enrichment runs (per-host scans).
+	nmapSem chan struct{}
 }
 
 // Config is optional metadata for diagnostics and the UI.
@@ -73,6 +77,7 @@ func New(logger *log.Logger, st *store.Store, scanner *discovery.Scanner, cfg Co
 		debug:          cfg.Debug,
 		deviceAliases:  aliases,
 		webEnrichLimit: rate.NewLimiter(rate.Limit(float64(webEnrichRPM)/60.0), 1),
+		nmapSem:        make(chan struct{}, nmapEnrichMaxConcurrent),
 	}
 	s.routes()
 	if cfg.Debug {
@@ -136,6 +141,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/setup/status", s.handleSetupStatus)
 	s.mux.HandleFunc("/api/setup/complete", s.requireCSRF(s.handleSetupComplete))
 	s.mux.HandleFunc("/api/settings/web-enrichment", s.requireCSRF(s.handleWebEnrichmentSettings))
+	s.mux.HandleFunc("/api/settings/nmap-enrichment", s.requireCSRF(s.handleNmapEnrichmentSettings))
 	s.mux.HandleFunc("/api/scan/status", s.handleScanStatus)
 	s.mux.HandleFunc("/api/scan/start", s.requireCSRF(s.handleScanStart))
 	s.mux.HandleFunc("/api/scan/cancel", s.requireCSRF(s.handleScanCancel))
@@ -904,9 +910,10 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       const hist = d.scan_history || [];
       const findings = d.findings || [];
       const inferences = d.inferences || [];
+      const prov = d.identity_provenance || {};
       const fp = h.fingerprint || null;
       const vendorDisp = String(h.vendor || "").trim();
-      let fpHtml = "<p class='muted'>No fingerprint record yet. After a scan completes, we store merged evidence: passive ARP / SSDP / mDNS, reverse DNS (PTR), UPnP device XML when available, OUI, HTTP(S) title and Server headers, TLS cert names, SSH banners, and (when ports are open) anonymous SMB strings and an RDP negotiation peek. <strong>Deep</strong> scan mode on Linux may add a raw SYN/SYN+ACK TCP fingerprint if the process has permission — not SNMP.</p>";
+      let fpHtml = "<p class='muted'>No fingerprint record yet. After a scan completes, we store merged evidence: passive ARP / SSDP / mDNS, reverse DNS (PTR), UPnP device XML when available, OUI, HTTP(S) title and Server headers, TLS cert names, SSH banners, optional RTSP OPTIONS banners on camera ports, and (when ports are open) anonymous SMB strings and an RDP negotiation peek. Optional <strong>Nmap enrichment</strong> (Diagnostics) adds per-service script output as signals/findings. <strong>Deep</strong> scan mode on Linux may add a raw SYN/SYN+ACK TCP fingerprint if the process has permission — not SNMP.</p>";
       if (fp && typeof fp === "object") {
         const sigs = fp.signals || [];
         const sigLis = sigs.map(function (s) {
@@ -920,7 +927,13 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         }
         const kindDisp = String(h.device_class || fp.device_class || "").trim();
         if (kindDisp) {
-          fpHtml += "<dt>Inferred kind</dt><dd>" + esc(kindDisp) + " <span class='muted'>(fused ports, SSDP types, PTR, HTTP banners)</span></dd>";
+          var kindNoteDup = "(fused ports, SSDP types, PTR, HTTP banners)";
+          if (prov.device_class === "web_llm") {
+            kindNoteDup = "(internet-assisted name hint — does not override fused classification)";
+          } else if (prov.device_class === "ports_passive_banners") {
+            kindNoteDup = "(fused ports, SSDP, mDNS, HTTP, PTR)";
+          }
+          fpHtml += "<dt>Inferred kind</dt><dd>" + esc(kindDisp) + " <span class='muted'>" + esc(kindNoteDup) + "</span></dd>";
         }
         if (fp.summary) {
           fpHtml += "<dt>Summary</dt><dd>" + esc(fp.summary) + "</dd>";
@@ -954,6 +967,27 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
         if (fp.serial) {
           fpHtml += "<dt>Serial</dt><dd>" + esc(fp.serial) + "</dd>";
         }
+        var hasNmap = false;
+        for (var ni = 0; ni < sigs.length; ni++) {
+          if (sigs[ni].source === "nmap") { hasNmap = true; break; }
+        }
+        if (prov.manufacturer || prov.device_class || prov.os || hasNmap) {
+          fpHtml += "<dt>Identity sources</dt><dd class='muted' style='font-size:14px;line-height:1.55;'>";
+          var pbits = [];
+          if (prov.manufacturer) {
+            pbits.push("Vendor column: <code>" + esc(prov.manufacturer) + "</code>");
+          }
+          if (prov.device_class) {
+            pbits.push("Kind: <code>" + esc(prov.device_class) + "</code>");
+          }
+          if (prov.os) {
+            pbits.push("OS row: <code>" + esc(prov.os) + "</code>");
+          }
+          if (hasNmap) {
+            pbits.push("Nmap signals add <strong>service/script evidence</strong> (Findings); they do not silently replace stronger fused vendor/kind/OS.");
+          }
+          fpHtml += pbits.join("<br/>") + "</dd>";
+        }
         fpHtml += "</dl>";
         if (sigLis) {
           fpHtml += "<p class='muted' style='margin:10px 0 4px 0;'>Evidence chain</p><ul style='margin:0;padding-left:1.2rem;font-size:14px;line-height:1.45;'>" + sigLis + "</ul>";
@@ -979,11 +1013,18 @@ func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
       const hintsStr = JSON.stringify(h.raw_hints || {}, null, 2);
       const vsub = vendorSubtitle(fp);
       const vendorLine = vendorDisp
-        ? "<strong>" + esc(vendorDisp) + "</strong>" + (vsub ? " <span class='muted'>(" + esc(vsub) + ")</span>" : "")
+        ? "<strong>" + esc(vendorDisp) + "</strong>" + (vsub ? " <span class='muted'>(" + esc(vsub) + ")</span>" : "") +
+          (prov.manufacturer ? " <span class='muted'>[src: <code>" + esc(prov.manufacturer) + "</code>]</span>" : "")
         : "<span class='muted'>—</span>";
       const kindRow = String(h.device_class || (fp && fp.device_class) || "").trim();
+      var kindMetaRow = "heuristic";
+      if (prov.device_class === "web_llm") {
+        kindMetaRow = "web_llm (weak)";
+      } else if (prov.device_class === "ports_passive_banners") {
+        kindMetaRow = "fused evidence";
+      }
       const kindLine = kindRow
-        ? "<strong>" + esc(kindRow) + "</strong> <span class='muted'>(heuristic)</span>"
+        ? "<strong>" + esc(kindRow) + "</strong> <span class='muted'>(" + esc(kindMetaRow) + ")</span>"
         : "<span class='muted'>—</span>";
       const portList = (h.open_ports && h.open_ports.length)
         ? h.open_ports.slice().map(function (p) { return String(p); }).sort(sortDetailPorts)

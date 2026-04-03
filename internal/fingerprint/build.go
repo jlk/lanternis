@@ -17,6 +17,7 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 	}
 	rec := &Record{SchemaVersion: 1}
 	ports := portSet(h.OpenPorts)
+	httpProbePaths := extraHTTPProbePaths(ports, opts)
 	var pctx ProbeContext
 
 	// L1: OUI from ARP MAC.
@@ -157,7 +158,7 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 
 	// HTTP(S) on open web ports — title, Server header, and classification keywords.
 	if ports["80"] {
-		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "80", "http", "tcp:80/http", opts)
+		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "80", "http", "tcp:80/http", httpProbePaths)
 		if ok {
 			pctx.HTTPTitle80 = title
 			pctx.HTTPServer80 = server
@@ -175,7 +176,7 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 	if ports["443"] {
-		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "443", "https", "tcp:443/https", opts)
+		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "443", "https", "tcp:443/https", httpProbePaths)
 		if ok {
 			pctx.HTTPTitle443 = title
 			pctx.HTTPServer443 = server
@@ -212,7 +213,7 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 
 	// Alternate web admin ports (already in TCP profiles for light+).
 	if ports["8080"] {
-		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "8080", "http", "tcp:8080/http", opts)
+		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "8080", "http", "tcp:8080/http", httpProbePaths)
 		if ok {
 			pctx.HTTPTitle8080 = title
 			pctx.HTTPServer8080 = server
@@ -230,7 +231,7 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 	if ports["8443"] {
-		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "8443", "https", "tcp:8443/https", opts)
+		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "8443", "https", "tcp:8443/https", httpProbePaths)
 		if ok {
 			pctx.HTTPTitle8443 = title
 			pctx.HTTPServer8443 = server
@@ -257,7 +258,7 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 		}
 	}
 	if ports["8888"] {
-		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "8888", "http", "tcp:8888/http", opts)
+		title, server, ok := appendHTTPIndexAndExtract(ctx, client, rec, h.IP, "8888", "http", "tcp:8888/http", httpProbePaths)
 		if ok {
 			pctx.HTTPTitle8888 = title
 			pctx.HTTPServer8888 = server
@@ -272,6 +273,20 @@ func Build(ctx context.Context, h store.Host, hints map[string]any, client *http
 				rec.Signals = append(rec.Signals, Signal{Source: "http_server", Field: "server_8888", Value: truncate(server, 200)})
 				rec.LadderMax = maxInt(rec.LadderMax, 3)
 			}
+		}
+	}
+
+	// RTSP (cameras / NVR) — OPTIONS probe; first open port of 554 / 8554 only.
+	if ports["554"] || ports["8554"] {
+		for _, rp := range []string{"554", "8554"} {
+			if !ports[rp] {
+				continue
+			}
+			if srv, ok := ProbeRTSPBanner(ctx, h.IP, rp); ok && strings.TrimSpace(srv) != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "rtsp_banner", Field: "port_" + rp, Value: truncate(srv, 200)})
+				rec.LadderMax = maxInt(rec.LadderMax, 4)
+			}
+			break
 		}
 	}
 
@@ -336,8 +351,8 @@ func ConfidenceFor(rec *Record) string {
 	}
 }
 
-// appendHTTPIndexAndExtract GETs / plus optional curated paths (thorough/deep), appends http_extract signals.
-func appendHTTPIndexAndExtract(ctx context.Context, client *http.Client, rec *Record, ip, port, scheme, surface string, opts *BuildOptions) (title, server string, ok bool) {
+// appendHTTPIndexAndExtract GETs / plus optional curated paths, appends http_extract signals.
+func appendHTTPIndexAndExtract(ctx context.Context, client *http.Client, rec *Record, ip, port, scheme, surface string, extraPaths []string) (title, server string, ok bool) {
 	title, server, body, err := FetchHTTPIndexMetaAndBody(ctx, client, scheme, ip, port)
 	if err != nil {
 		return "", "", false
@@ -347,25 +362,57 @@ func appendHTTPIndexAndExtract(ctx context.Context, client *http.Client, rec *Re
 			rec.Signals = append(rec.Signals, Signal{Source: "http_extract", Field: surface, Value: s})
 		}
 	}
-	if httpExtraPathsEnabled(opts) {
-		for _, path := range []string{"/version", "/api/status"} {
-			st, b, err := FetchHTTPGETPath(ctx, client, scheme, ip, port, path, 32*1024)
-			if err != nil {
-				continue
-			}
-			if st >= 500 {
-				continue
-			}
-			hints := ExtractHTTPVersionHints(b, "")
-			for i := range hints {
-				hints[i].Path = path
-				if s := MarshalHTTPExtractPayload(hints[i]); s != "" {
-					rec.Signals = append(rec.Signals, Signal{Source: "http_extract", Field: surface, Value: s})
-				}
+	for _, path := range extraPaths {
+		st, b, err := FetchHTTPGETPath(ctx, client, scheme, ip, port, path, 32*1024)
+		if err != nil {
+			continue
+		}
+		if st >= 500 {
+			continue
+		}
+		hints := ExtractHTTPVersionHints(b, "")
+		for i := range hints {
+			hints[i].Path = path
+			if s := MarshalHTTPExtractPayload(hints[i]); s != "" {
+				rec.Signals = append(rec.Signals, Signal{Source: "http_extract", Field: surface, Value: s})
 			}
 		}
 	}
 	return title, server, true
+}
+
+func extraHTTPProbePaths(ports map[string]bool, opts *BuildOptions) []string {
+	var out []string
+	camHint := ports["554"] || ports["8554"] || ports["37777"] || ports["34567"]
+	if httpExtraPathsEnabled(opts) {
+		out = append(out, "/version", "/api/status")
+		if camHint {
+			out = append(out, "/onvif/device_service")
+		}
+		if ports["8123"] {
+			out = append(out, "/api/config")
+		}
+	} else if camHint && (ports["80"] || ports["8080"] || ports["443"] || ports["8443"]) {
+		out = append(out, "/onvif/device_service")
+	}
+	return dedupeStringsKeepOrder(out)
+}
+
+func dedupeStringsKeepOrder(in []string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func summarize(rec *Record) string {

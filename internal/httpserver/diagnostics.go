@@ -53,6 +53,10 @@ func (s *Server) buildDiagnostics(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	nmapEnrich, err := s.store.NmapEnrichmentEnabled(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var lastScan any
 	if last != nil {
 		m := map[string]any{
@@ -89,6 +93,8 @@ func (s *Server) buildDiagnostics(ctx context.Context) (map[string]any, error) {
 		"web_enrichment_provider":      webProv,
 		"openai_api_key_configured":    openAIConfigured,
 		"anthropic_api_key_configured": anthropicConfigured,
+		"nmap_enrichment_enabled":      nmapEnrich,
+		"nmap_on_path":                 nmapOnPath(),
 	}, nil
 }
 
@@ -116,6 +122,10 @@ func (s *Server) handleAbout(w http.ResponseWriter, _ *http.Request) {
     <p class="muted">Read-only snapshot for troubleshooting. Same payload as <code>GET /api/diagnostics</code>.</p>
     <p><button type="button" id="supportExportBtn">Download redacted support bundle (JSON)</button> <span id="supportExportMsg" class="muted"></span></p>
     <p class="muted" style="font-size:14px;">The bundle includes versions, probe mode, scan/inventory <strong>counts</strong>, and audit <strong>event types</strong> — not full paths, audit payloads, or per-host IPs.</p>
+    <h2 style="font-size:18px;margin-top:28px;">Nmap enrichment (optional)</h2>
+    <p class="muted" style="font-size:14px;">When enabled and <code>nmap</code> is on your <code>PATH</code>, finished scans run a <strong>bounded</strong> per-host <code>nmap</code> pass on TCP ports we already found (plus UDP 1900 when SSDP hints exist), using a small allowlisted script set. Results merge as <code>nmap</code> signals and structured findings. Install Nmap separately; Lanternis does not bundle it.</p>
+    <p><label class="setup-check" style="display:flex;gap:8px;align-items:center;"><input type="checkbox" id="nmapEnabled" /> Enable Nmap enrichment</label> <span id="nmapPathHint" class="muted"></span></p>
+    <p><button type="button" id="nmapSave">Save Nmap setting</button> <span id="nmapMsg" class="muted"></span></p>
     <h2 style="font-size:18px;margin-top:28px;">Internet-assisted name hints</h2>
     <p class="muted" style="font-size:14px;">Optional: send <strong>hostname fragments and device-class hints</strong> (not your IP) to <a href="https://platform.openai.com/" target="_blank" rel="noopener noreferrer">OpenAI</a> or <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer">Anthropic (Claude)</a> using your API key. Suggestions appear as <code>web_llm</code> under Name hints after a scan. Keys stay in your local DB only.</p>
     <p><label class="setup-check" style="display:flex;gap:8px;align-items:center;"><input type="checkbox" id="weEnabled" /> Enable internet-assisted name hints</label></p>
@@ -203,6 +213,39 @@ func (s *Server) handleAbout(w http.ResponseWriter, _ *http.Request) {
       }
     });
     loadWebEnrich();
+    async function loadNmapEnrich() {
+      try {
+        const d = await fetch("/api/settings/nmap-enrichment").then((r) => r.json());
+        document.getElementById("nmapEnabled").checked = !!d.enabled;
+        const hint = document.getElementById("nmapPathHint");
+        hint.textContent = d.nmap_on_path ? "(nmap detected on PATH)" : "(nmap not found on PATH — install to use)";
+      } catch (e) {
+        document.getElementById("nmapPathHint").textContent = "";
+      }
+    }
+    document.getElementById("nmapSave").addEventListener("click", async function () {
+      const msg = document.getElementById("nmapMsg");
+      msg.textContent = "";
+      try {
+        const csrf = await fetch("/api/csrf").then((r) => r.json());
+        const token = csrf.csrf_token || "";
+        const res = await fetch("/api/settings/nmap-enrichment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": token },
+          credentials: "same-origin",
+          body: JSON.stringify({ enabled: document.getElementById("nmapEnabled").checked })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || ("HTTP " + res.status));
+        }
+        msg.textContent = "Saved.";
+        await loadNmapEnrich();
+      } catch (e) {
+        msg.textContent = "Error: " + e.message;
+      }
+    });
+    loadNmapEnrich();
     fetch("/api/diagnostics")
       .then((r) => r.json())
       .then((data) => {

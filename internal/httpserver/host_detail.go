@@ -64,9 +64,10 @@ func (s *Server) handleHostDetail(w http.ResponseWriter, r *http.Request) {
 		inferences = []fingerprint.NameInference{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"host":         newHostJSON(*host),
-		"findings":     findings,
-		"inferences":   inferences,
-		"scan_history": hist,
+		"host":                 newHostJSON(*host),
+		"findings":             findings,
+		"inferences":           inferences,
+		"scan_history":         hist,
+		"identity_provenance": fingerprint.IdentityProvenanceFromBlob(host.Fingerprint),
 	})
 }

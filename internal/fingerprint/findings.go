@@ -3,6 +3,7 @@ package fingerprint
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"regexp"
 	"strings"
 
@@ -26,6 +27,8 @@ func FindingsFromRecord(rec *Record) []store.Finding {
 	appendHTTPExtractFindings(rec, &out)
 	appendTLSWeakFindings(rec, &out)
 	appendSSHFindings(rec, &out)
+	appendNmapFindings(rec, &out)
+	appendRTSPFindings(rec, &out)
 	return out
 }
 
@@ -259,4 +262,91 @@ func appendSSHFindings(rec *Record, out *[]store.Finding) {
 func digestEvidence(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:16])
+}
+
+func appendNmapFindings(rec *Record, out *[]store.Finding) {
+	for _, s := range rec.Signals {
+		if s.Source != "nmap" || !strings.HasPrefix(s.Field, "service:") || strings.TrimSpace(s.Value) == "" {
+			continue
+		}
+		var p NmapServicePayload
+		if err := json.Unmarshal([]byte(s.Value), &p); err != nil {
+			continue
+		}
+		proto := strings.TrimSpace(p.Proto)
+		port := strings.TrimSpace(p.Port)
+		if proto == "" || port == "" {
+			continue
+		}
+		name := strings.TrimSpace(p.Name)
+		surf := proto + ":" + port
+		if name != "" {
+			surf += "/" + name
+		}
+		prod := strings.TrimSpace(p.Product)
+		ver := strings.TrimSpace(p.Version)
+		extra := strings.TrimSpace(p.Extrainfo)
+		evText := strings.TrimSpace(strings.Join([]string{prod, ver, extra}, " "))
+		conf := "low"
+		vr := false
+		if ver != "" && len(ver) >= 2 && strings.ContainsAny(ver, "0123456789") {
+			conf = "medium"
+			vr = true
+			if prod != "" {
+				conf = "high"
+			}
+		} else if prod != "" {
+			conf = "low"
+		}
+		if evText != "" {
+			*out = append(*out, store.Finding{
+				Surface:           surf + "/nmap",
+				ProductGuess:      prod,
+				VersionGuess:      ver,
+				VersionConfidence: conf,
+				EvidenceKind:      "nmap_service",
+				EvidenceDigest:    digestEvidence(evText + "|" + s.Field),
+				VulnReady:         vr,
+			})
+		}
+		for id, txt := range p.Scripts {
+			txt = strings.TrimSpace(txt)
+			if txt == "" {
+				continue
+			}
+			pg := txt
+			if len(pg) > 140 {
+				pg = pg[:137] + "…"
+			}
+			*out = append(*out, store.Finding{
+				Surface:           surf + "/nmap_script:" + id,
+				ProductGuess:      pg,
+				VersionConfidence: "low",
+				EvidenceKind:      "nmap_script:" + id,
+				EvidenceDigest:    digestEvidence(id + "|" + txt),
+				VulnReady:         false,
+			})
+		}
+	}
+}
+
+func appendRTSPFindings(rec *Record, out *[]store.Finding) {
+	for _, s := range rec.Signals {
+		if s.Source != "rtsp_banner" || strings.TrimSpace(s.Value) == "" {
+			continue
+		}
+		port := strings.TrimPrefix(s.Field, "port_")
+		if port == "" || port == s.Field {
+			port = "554"
+		}
+		v := strings.TrimSpace(s.Value)
+		*out = append(*out, store.Finding{
+			Surface:           "tcp:" + port + "/rtsp",
+			ProductGuess:      v,
+			VersionConfidence: "low",
+			EvidenceKind:      "rtsp_server_banner",
+			EvidenceDigest:    digestEvidence(v),
+			VulnReady:         false,
+		})
+	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jlk/lanternis/internal/discovery/passive"
 	"github.com/jlk/lanternis/internal/fingerprint"
+	"github.com/jlk/lanternis/internal/nmapenrich"
 	"github.com/jlk/lanternis/internal/store"
 	"github.com/jlk/lanternis/internal/webenrich"
 )
@@ -44,6 +45,29 @@ func (s *Server) applyFingerprints(ctx context.Context, cidr string, hosts []sto
 				label = strings.TrimSpace(h.Label)
 			}
 			if rec != nil {
+				if on, _ := s.store.NmapEnrichmentEnabled(ctx); on {
+					if npath, ok := nmapenrich.LookPath(); ok {
+						select {
+						case s.nmapSem <- struct{}{}:
+							func() {
+								defer func() { <-s.nmapSem }()
+								nctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+								defer cancel()
+								if err := nmapenrich.Enrich(nctx, rec, h.IP, h.OpenPorts, hints, npath, nmapenrich.DefaultOptions()); err != nil {
+									if s.debug {
+										s.debugf("nmap enrich ip=%s: %v", h.IP, err)
+									}
+								}
+							}()
+						case <-ctx.Done():
+							if s.debug {
+								s.debugf("nmap enrich ip=%s: skipped (scan context done)", h.IP)
+							}
+						}
+					} else if s.debug {
+						s.debugf("nmap enrich ip=%s: nmap not on PATH", h.IP)
+					}
+				}
 				prevLLM := fingerprint.WebLLMInferencesFromBlob(h.Fingerprint)
 				if len(prevLLM) > 0 {
 					fingerprint.MergeWebLLMFieldsFromPrevious(rec, h.Fingerprint)

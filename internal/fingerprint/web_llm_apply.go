@@ -76,7 +76,7 @@ func ApplyWebLLMStructured(rec *Record, vendor, deviceClassKey, osFamily string,
 		confidence = "low"
 	}
 	v := strings.TrimSpace(vendor)
-	if v != "" && strings.TrimSpace(rec.Manufacturer) == "" {
+	if v != "" && strings.TrimSpace(rec.Manufacturer) == "" && !hasStrongManufacturerProtocolEvidence(rec) {
 		rec.Manufacturer = truncate(v, 120)
 		rec.Signals = appendWebLLMSignal(rec.Signals, Signal{Source: "web_llm", Field: "manufacturer", Value: rec.Manufacturer})
 	}
@@ -92,6 +92,18 @@ func ApplyWebLLMStructured(rec *Record, vendor, deviceClassKey, osFamily string,
 	}
 }
 
+func hasStrongManufacturerProtocolEvidence(rec *Record) bool {
+	if rec == nil {
+		return false
+	}
+	for _, s := range rec.Signals {
+		if s.Source == "upnp_xml" && s.Field == "manufacturer" && strings.TrimSpace(s.Value) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func applyWebLLMSignalMerge(rec *Record, sig Signal) {
 	v := strings.TrimSpace(sig.Value)
 	if v == "" {
@@ -99,7 +111,7 @@ func applyWebLLMSignalMerge(rec *Record, sig Signal) {
 	}
 	switch sig.Field {
 	case "manufacturer":
-		if strings.TrimSpace(rec.Manufacturer) != "" {
+		if strings.TrimSpace(rec.Manufacturer) != "" || hasStrongManufacturerProtocolEvidence(rec) {
 			return
 		}
 		rec.Manufacturer = truncate(v, 120)

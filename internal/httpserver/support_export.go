@@ -63,6 +63,10 @@ func (s *Server) buildSupportBundle(ctx context.Context) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
+	nmapEnrich, err := s.store.NmapEnrichmentEnabled(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	byReach := map[string]int{}
 	hintsRows := 0
@@ -133,6 +137,8 @@ func (s *Server) buildSupportBundle(ctx context.Context) (map[string]any, error)
 			"web_enrichment_provider":      webProv,
 			"openai_api_key_configured":    openAIConfigured,
 			"anthropic_api_key_configured": anthropicConfigured,
+			"nmap_enrichment_enabled":      nmapEnrich,
+			"nmap_on_path":                 nmapOnPath(),
 		},
 		"scan_status": s.scanner.Status(),
 		"concurrency_modes": map[string]int{

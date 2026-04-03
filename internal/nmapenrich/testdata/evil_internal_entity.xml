@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!DOCTYPE nmaprun [
+  <!ENTITY xxe "boom">
+]>
+<nmaprun>
+  <host>
+    <ports>
+      <port protocol="tcp" portid="22">
+        <state state="open"/>
+        <service name="ssh"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>

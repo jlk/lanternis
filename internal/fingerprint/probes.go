@@ -115,7 +115,7 @@ func FetchHTTPGETPath(ctx context.Context, client *http.Client, scheme, ip, port
 
 func httpProbePathAllowed(path string) bool {
 	switch path {
-	case "/version", "/api/status":
+	case "/version", "/api/status", "/onvif/device_service", "/api/config":
 		return true
 	default:
 		return false

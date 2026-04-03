@@ -322,6 +322,30 @@ func TestWebEnrichmentSettings(t *testing.T) {
 	}
 }
 
+func TestNmapEnrichmentSettings(t *testing.T) {
+	ctx := context.Background()
+	st, cleanup := mustTestStore(t, ctx)
+	defer cleanup()
+	en, err := st.NmapEnrichmentEnabled(ctx)
+	if err != nil || en {
+		t.Fatalf("default enabled=%v err=%v", en, err)
+	}
+	if err := st.SetNmapEnrichment(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	en, err = st.NmapEnrichmentEnabled(ctx)
+	if err != nil || !en {
+		t.Fatalf("after enable: %v err=%v", en, err)
+	}
+	if err := st.SetNmapEnrichment(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	en, _ = st.NmapEnrichmentEnabled(ctx)
+	if en {
+		t.Fatal("expected disabled")
+	}
+}
+
 func TestReplaceHostFindingsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	st, cleanup := mustTestStore(t, ctx)
